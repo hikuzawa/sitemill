@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any
 
 from sitemill.diff.hasher import url_key
-from sitemill.fetch.decode import decode_html
 from sitemill.store.jsonio import read_json, write_json
 
 
@@ -41,4 +40,6 @@ class RawCache:
                 return content.decode(enc)
             except (UnicodeDecodeError, LookupError):
                 pass
+        from sitemill.fetch.decode import decode_html  # 循環インポート回避
+
         return decode_html(content, meta.get("content_type"))[0]
