@@ -1,0 +1,171 @@
+"""sitemill CLI。サービスのルート（site.toml のある場所）で実行する。"""
+
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+from typing import Annotated
+
+import typer
+
+from sitemill import __version__, commands
+from sitemill.build.site import BuildError
+from sitemill.extract.llm import LLMError
+from sitemill.settings import SecretsError
+
+app = typer.Typer(
+    help="公的・公式サイトの監視→差分検知→構造化→静的サイト生成→デプロイ→計測",
+    no_args_is_help=True,
+)
+
+RootOpt = Annotated[Path | None, typer.Option("--root", "-r", help="site.toml のあるディレクトリ")]
+SourceOpt = Annotated[list[str] | None, typer.Option("--source", "-s", help="対象 source id")]
+
+
+def _runtime(root: Path | None) -> commands.Runtime:
+    try:
+        return commands.Runtime.open(root)
+    except (FileNotFoundError, ValueError, TypeError) as e:
+        typer.echo(f"エラー: {e}", err=True)
+        raise typer.Exit(code=2) from e
+
+
+def _report(report: object) -> None:
+    from sitemill.models import RunReport
+
+    if isinstance(report, RunReport):
+        for stage, counts in report.stages.items():
+            typer.echo(f"[{stage}] " + " ".join(f"{k}={v}" for k, v in sorted(counts.items())))
+        if report.llm.calls:
+            llm = report.llm
+            typer.echo(
+                f"[llm] calls={llm.calls} cached={llm.cached_calls} "
+                f"in={llm.input_tokens} out={llm.output_tokens}"
+            )
+        for err in report.errors:
+            typer.echo(f"  ! {err}", err=True)
+
+
+@app.callback()
+def main(
+    verbose: Annotated[bool, typer.Option("--verbose", "-v", help="詳細ログ")] = False,
+) -> None:
+    logging.basicConfig(
+        level=logging.DEBUG if verbose else logging.INFO,
+        format="%(levelname)s %(name)s: %(message)s",
+    )
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+
+
+@app.command()
+def version() -> None:
+    """バージョンを表示する。"""
+    typer.echo(f"sitemill {__version__}")
+
+
+@app.command()
+def discover(root: RootOpt = None, source: SourceOpt = None) -> None:
+    """公式サイトから目的ページの候補を集め、data/state/discovery/ に書き出す。"""
+    _report(commands.cmd_discover(_runtime(root), source))
+
+
+@app.command()
+def crawl(
+    root: RootOpt = None,
+    source: SourceOpt = None,
+    force: Annotated[bool, typer.Option("--force", help="条件付き GET を使わず取り直す")] = False,
+    max_pages: Annotated[
+        int | None, typer.Option("--max-pages", help="Source あたりの上限")
+    ] = None,
+) -> None:
+    """robots と間隔を守って巡回し、変化したページに印を付ける。"""
+    _report(commands.cmd_crawl(_runtime(root), source, force=force, max_pages=max_pages))
+
+
+@app.command()
+def extract(
+    root: RootOpt = None,
+    source: SourceOpt = None,
+    all_pages: Annotated[bool, typer.Option("--all", help="変化の有無に関わらず全ページ")] = False,
+    limit: Annotated[int | None, typer.Option("--limit", help="処理するページ数の上限")] = None,
+) -> None:
+    """変化したページを LLM で構造化し、レコードに取り込む。"""
+    rt = _runtime(root)
+    try:
+        report = commands.cmd_extract(rt, source, all_pages=all_pages, limit=limit)
+    except SecretsError as e:
+        typer.echo(f"停止: {e}", err=True)
+        raise typer.Exit(code=3) from e
+    except LLMError as e:
+        typer.echo(f"LLM エラー: {e}", err=True)
+        raise typer.Exit(code=4) from e
+    _report(report)
+    if report.extraction_metrics:
+        from sitemill.metrics.extraction import ExtractionMetrics
+
+        typer.echo(ExtractionMetrics.model_validate(report.extraction_metrics).table())
+
+
+@app.command()
+def build(root: RootOpt = None) -> None:
+    """静的サイトを dist/ に生成する。信頼シグナルが欠けたページがあれば失敗する。"""
+    try:
+        _report(commands.cmd_build(_runtime(root)))
+    except BuildError as e:
+        typer.echo(f"ビルド失敗: {e}", err=True)
+        raise typer.Exit(code=5) from e
+
+
+@app.command()
+def run(root: RootOpt = None, source: SourceOpt = None) -> None:
+    """crawl → extract → build をまとめて実行する。"""
+    rt = _runtime(root)
+    try:
+        for report in commands.cmd_run(rt, source):
+            typer.echo(f"== {report.command} ==")
+            _report(report)
+    except SecretsError as e:
+        typer.echo(f"停止: {e}", err=True)
+        raise typer.Exit(code=3) from e
+    except BuildError as e:
+        typer.echo(f"ビルド失敗: {e}", err=True)
+        raise typer.Exit(code=5) from e
+
+
+@app.command(name="eval")
+def eval_cmd(root: RootOpt = None) -> None:
+    """保存済み fixture で抽出精度を計測する（外部アクセスなし）。"""
+    result = commands.cmd_eval(_runtime(root))
+    typer.echo(result.table())
+
+
+@app.command()
+def deploy(
+    root: RootOpt = None,
+    dry_run: Annotated[bool, typer.Option("--dry-run/--no-dry-run", help="検査のみ")] = True,
+    project: Annotated[str | None, typer.Option("--project", help="Pages のプロジェクト名")] = None,
+) -> None:
+    """dist/ を検査し、--no-dry-run なら Cloudflare Pages に配置する。"""
+    plan = commands.cmd_deploy(_runtime(root), dry_run=dry_run, project=project)
+    for note in plan.notes:
+        typer.echo(note)
+    for problem in plan.problems:
+        typer.echo(f"  ! {problem}", err=True)
+    if not plan.ok:
+        raise typer.Exit(code=6)
+
+
+@app.command()
+def status(root: RootOpt = None) -> None:
+    """巡回状態とレコード数を表示する。"""
+    info = commands.cmd_status(_runtime(root))
+    typer.echo(f"sources={info['sources']} urls={info['urls']}")
+    for sid, row in info["by_source"].items():
+        typer.echo(
+            f"  {sid:<20} policy={row['policy']:<9} urls={row['urls']:>3} "
+            f"pending={row['pending']:>3} records={row['records']:>4} active={row['active']:>4}"
+        )
+
+
+if __name__ == "__main__":  # pragma: no cover
+    app()

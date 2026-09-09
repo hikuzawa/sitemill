@@ -1,0 +1,41 @@
+{# sitemill が提供する共通マクロ。サービス側のテンプレートから {% import "sitemill/macros.html" as sm %} で使う #}
+
+{% macro trust_block(trust) %}
+<section class="trust" data-sitemill-trust aria-label="この情報について">
+  <h2 class="trust-title">この情報について</h2>
+  <dl class="trust-list">
+    <dt>最終更新</dt>
+    <dd><time datetime="{{ trust.updated_at.isoformat() }}">{{ trust.updated_at|datetime_ja }}</time>（日本時間）</dd>
+    {% if trust.record_count is not none %}
+    <dt>データ件数</dt>
+    <dd>{{ trust.record_count|number }} 件</dd>
+    {% endif %}
+    <dt>一次情報</dt>
+    <dd>
+      {% if trust.sources %}
+      <ul class="trust-sources">
+        {% for s in trust.sources %}
+        <li><a href="{{ s.url }}" rel="noopener" target="_blank">{{ s.label }}</a>{% if s.fetched_at %}（取得: {{ s.fetched_at|datetime_ja }}）{% endif %}</li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      各自治体の公式ページ
+      {% endif %}
+    </dd>
+    <dt>運営者</dt>
+    <dd>{{ trust.operator.name }}{% if trust.operator.url %}（<a href="{{ trust.operator.url }}">詳細</a>）{% endif %} ／ 連絡先: {{ trust.operator.contact }}</dd>
+  </dl>
+</section>
+{% endmacro %}
+
+{% macro field(label, fv, formatter=none) %}
+<dt>{{ label }}</dt>
+<dd>
+  {% if fv and fv.ok %}
+    {% if formatter %}{{ formatter(fv.value) }}{% else %}{{ fv.value }}{% endif %}
+    {% if fv.quote and fv.quote != fv.value|string %}<span class="quote" title="原文: {{ fv.quote }}">（原文: {{ fv.quote }}）</span>{% endif %}
+  {% else %}
+    <span class="missing">記載なし{% if fv and fv.quote %}（原文: {{ fv.quote }}）{% endif %}</span>
+  {% endif %}
+</dd>
+{% endmacro %}
