@@ -1,7 +1,7 @@
 """fixture による抽出精度の計測（ADR 0010）。外部アクセスなしで抽出パイプラインを通す。
 
 ケースのディレクトリ構成（tests/fixtures/eval/<case>/）:
-- page.html          保存済みの HTML
+- page.html          保存済みの HTML（meta.json の html で別パスも指定できる）
 - meta.json          {"url": ..., "kind": "listing_index",
                       "key_field": "listing_no", "selector": null}
 - llm_response.json  保存済みの LLM 応答（本番と同じ JSON）
@@ -39,10 +39,14 @@ def load_eval_cases(root: Path) -> list[EvalCase]:
     if not root.is_dir():
         return cases
     for case_dir in sorted(p for p in root.iterdir() if p.is_dir()):
-        required = [case_dir / n for n in ("page.html", "meta.json", "llm_response.json")]
+        required = [case_dir / n for n in ("meta.json", "llm_response.json")]
         if not all(p.is_file() for p in required):
             continue
         meta = json.loads((case_dir / "meta.json").read_text(encoding="utf-8"))
+        # html は既定で page.html。共有 fixture を使うときは meta.json の "html" に相対パスを書く
+        html_path = (case_dir / meta.get("html", "page.html")).resolve()
+        if not html_path.is_file():
+            continue
         expected_path = case_dir / "expected.json"
         expected: list[dict[str, Any]] = []
         if expected_path.is_file():
@@ -52,7 +56,7 @@ def load_eval_cases(root: Path) -> list[EvalCase]:
                 name=case_dir.name,
                 url=meta["url"],
                 kind=meta.get("kind", "listing_index"),
-                html=(case_dir / "page.html").read_text(encoding="utf-8"),
+                html=html_path.read_text(encoding="utf-8"),
                 llm_response=json.loads(
                     (case_dir / "llm_response.json").read_text(encoding="utf-8")
                 ),
