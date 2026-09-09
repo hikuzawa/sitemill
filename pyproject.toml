@@ -1,0 +1,47 @@
+[project]
+name = "sitemill"
+version = "0.1.0"
+description = "公的・公式サイトを監視→差分検知→構造化→静的サイト生成→デプロイ→計測する共通エンジン"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "httpx>=0.27",
+    "protego>=0.3",
+    "selectolax>=0.3.21",
+    "pydantic>=2.8",
+    "pydantic-settings>=2.4",
+    "jinja2>=3.1",
+    "typer>=0.12",
+    "pyyaml>=6.0",
+    "charset-normalizer>=3.3",
+    "anthropic>=0.40",
+]
+
+[project.scripts]
+sitemill = "sitemill.cli:app"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.2",
+    "respx>=0.21",
+    "ruff>=0.6",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sitemill"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
