@@ -34,7 +34,7 @@ def _evidence(text: str, m: re.Match[str], width: int = 80) -> str:
 
 
 def detect_license(html: str, url: str, *, credit_name: str) -> LicenseVerdict:
-    """HTML（リンク URL を含む）と本文テキストから判定する。許可指標と拒否指標が両方あれば不採用。"""
+    """HTML（リンク URL 込み）と本文から判定する。許可と拒否の表記が両方あれば不採用。"""
     text = page_text(html)
     haystacks = (html, text)
     allow_hit: tuple[LicenseId, str] | None = None

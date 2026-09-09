@@ -1,4 +1,4 @@
-"""抽出精度の集計。項目ごとの抽出率と null 理由を数え、eval と本番レポートで同じ形を使う（ADR 0010）。"""
+"""抽出精度の集計。項目別の抽出率と null 理由を数え、eval と本番で同じ形を使う（ADR 0010）。"""
 
 from __future__ import annotations
 
