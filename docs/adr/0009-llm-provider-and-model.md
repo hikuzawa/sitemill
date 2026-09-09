@@ -8,7 +8,7 @@
 ## 決定
 - `extract/llm` に `LLMProvider` プロトコルを置き、`anthropic`（既定）と `fixture`（保存済み応答を返す）を実装する。OpenAI など他社は使わない（事業判断）
 - 構造化出力は JSON Schema（pydantic モデルから生成）で受け取る
-- 既定モデルは Claude Haiku 4.5（`claude-haiku-4-5-20251001`）。`site.toml` の `[llm] model` で差し替える
+- 既定モデルは Claude Haiku 4.5（`claude-haiku-4-5`）。`site.toml` の `[llm] model` で差し替える
 - 入力ハッシュ（プロンプト版・モデル・本文）でキャッシュし、同じ入力では再呼び出ししない
 - 鍵は `ANTHROPIC_API_KEY` を .env から読む。無ければ抽出段で止まり、.env に書くべき変数名を表示する
 - ページ本文はデータとして扱う。出力は固定スキーマのみで、副作用のあるツールは持たせない
