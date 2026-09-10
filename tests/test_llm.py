@@ -15,14 +15,30 @@ from sitemill.extract.llm import (
 from sitemill.settings import Secrets, SecretsError
 
 
+class _FakeStream:
+    def __init__(self, response: object) -> None:
+        self.response = response
+
+    def __enter__(self) -> "_FakeStream":
+        return self
+
+    def __exit__(self, *exc: object) -> bool:
+        return False
+
+    def get_final_message(self) -> object:
+        if isinstance(self.response, Exception):
+            raise self.response
+        return self.response
+
+
 class _FakeMessages:
     def __init__(self, response: object) -> None:
         self.response = response
         self.kwargs: dict[str, object] | None = None
 
-    def create(self, **kwargs: object) -> object:
+    def stream(self, **kwargs: object) -> _FakeStream:
         self.kwargs = kwargs
-        return self.response
+        return _FakeStream(self.response)
 
 
 class _FakeClient:
@@ -71,6 +87,7 @@ def test_anthropic_provider_omits_temperature_for_models_without_sampling() -> N
         (_response("{}", stop="refusal"), "拒否"),
         (_response("{}", stop="max_tokens"), "max_tokens"),
         (_response("not json"), "JSON"),
+        (ValueError("Streaming is required"), "SDK"),
     ],
 )
 def test_anthropic_provider_raises_on_unusable_responses(response: object, message: str) -> None:

@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import anthropic
+
 from sitemill.extract.llm.base import LLMError, LLMResult, supports_sampling
 
 
@@ -13,8 +15,6 @@ class AnthropicProvider:
 
     def __init__(self, api_key: str, *, client: Any | None = None) -> None:
         if client is None:
-            import anthropic
-
             client = anthropic.Anthropic(api_key=api_key)
         self._client = client
 
@@ -40,7 +40,16 @@ class AnthropicProvider:
         # 4.6 以降の世代のモデルには送らない（400 になる）
         if temperature is not None and supports_sampling(model):
             kwargs["extra_body"] = {"temperature": temperature}
-        resp = self._client.messages.create(**kwargs)
+        try:
+            # 一覧ページは出力が長くなるため常にストリーミングで受け、最終メッセージだけを使う
+            with self._client.messages.stream(**kwargs) as stream:
+                resp = stream.get_final_message()
+        except anthropic.APIStatusError as e:
+            raise LLMError(f"API エラー {e.status_code}: {str(e)[:300]}") from e
+        except anthropic.APIConnectionError as e:
+            raise LLMError(f"接続エラー: {str(e)[:300]}") from e
+        except ValueError as e:  # SDK 側の事前検証（例: 非ストリーミングでの長すぎる max_tokens）
+            raise LLMError(f"SDK エラー: {str(e)[:300]}") from e
         if resp.stop_reason == "refusal":
             raise LLMError("LLM が応答を拒否しました（stop_reason=refusal）")
         if resp.stop_reason == "max_tokens":
