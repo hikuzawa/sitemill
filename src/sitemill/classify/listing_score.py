@@ -208,7 +208,8 @@ def detect_pagination(tree: HTMLParser, url: str) -> PaginationInfo:
     pattern: str | None = None
     if page_links or current > 1:
         base = urlsplit(first_url)
-        prefix = re.escape(f"{base.scheme}://{base.netloc}{base.path.rstrip('/')}")
+        # スキームは固定しない（seed が http でもサイト内リンクは https のことがある）
+        prefix = r"https?://" + re.escape(f"{base.netloc}{base.path.rstrip('/')}")
         sample = page_links[0] if page_links else url
         if _PAGE_PATH.search(urlsplit(sample).path):
             pattern = prefix + r"/page/\d+/?$"
