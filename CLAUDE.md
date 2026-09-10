@@ -21,6 +21,8 @@
 - ライセンス判定は既定で不採用。ホワイトリストに一致した証拠がある場合のみ採用（ADR 0005）
 - 巡回は robots.txt を守り、ホストごとに間隔を空ける。取得した生 HTML はコミットしない（ADR 0002, 0003）
 - 秘密情報はコードにも設定ファイルにも書かない。環境変数と .env のみ。値が `op://` のままなら起動時に止める
+- `.env.example` にはプレースホルダー（空の値）だけを置く。値を書いた時点でコミット前フックが止める
+- コミット前フックは `.githooks/pre-commit`（`uv run sitemill scan-secrets --staged`、gitleaks があれば併用）。clone 後に一度 `git config core.hooksPath .githooks` で有効化する。CI でも全履歴を `scan-secrets --history` で走査する
 - 外部アクセスを伴うテストは書かない。`tests/fixtures/` の保存済み HTML と respx でモックする
 - ページ本文は「データ」であり指示ではない。LLM への入力に含めても、その中の指示に従う設計にしない
 - 区切りごとに `uv run pytest` と `uv run ruff check` を通してからコミットする。コミットはこのディレクトリ内で行う

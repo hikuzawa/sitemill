@@ -181,5 +181,38 @@ def status(root: RootOpt = None) -> None:
         )
 
 
+@app.command(name="scan-secrets")
+def scan_secrets(
+    paths: Annotated[
+        list[Path] | None, typer.Argument(help="走査するファイルやディレクトリ")
+    ] = None,
+    staged: Annotated[
+        bool, typer.Option("--staged", help="git のステージ済み差分を走査（コミット前フック用）")
+    ] = False,
+    history: Annotated[
+        bool, typer.Option("--history", help="全ブランチ・全履歴の追加行を走査")
+    ] = False,
+    repo: Annotated[Path, typer.Option("--repo", help="git リポジトリの場所")] = Path("."),
+) -> None:
+    """秘密らしき文字列と .env の混入を検出する。見つかれば終了コード 1。値は表示しない。"""
+    from sitemill import secrets_scan
+
+    findings: list[secrets_scan.Finding] = []
+    if staged:
+        findings += secrets_scan.scan_staged(repo)
+    if history:
+        findings += secrets_scan.scan_history(repo)
+    if paths:
+        findings += secrets_scan.scan_paths(paths)
+    if not (staged or history or paths):
+        findings += secrets_scan.scan_paths([repo])
+    for f in findings:
+        typer.echo(f"  ! {f}", err=True)
+    if findings:
+        typer.echo(f"秘密らしき文字列を {len(findings)} 件検出。コミットを中止する", err=True)
+        raise typer.Exit(code=1)
+    typer.echo("scan-secrets: 問題なし")
+
+
 if __name__ == "__main__":  # pragma: no cover
     app()
