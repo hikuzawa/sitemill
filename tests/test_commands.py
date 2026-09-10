@@ -143,3 +143,29 @@ def test_load_service_and_sources_yaml(tmp_path: Path, monkeypatch: pytest.Monke
     )
     sources = load_sources_yaml(yaml_path)
     assert sources[0].id == "a" and not sources[0].crawlable
+
+
+def test_eval_record_replaces_fixture_response(rt: commands.Runtime) -> None:
+    case = rt.ws.fixtures_dir / "eval" / "case1"
+    case.mkdir(parents=True)
+    (case / "page.html").write_text(
+        "<html><body><main><p>物件番号 7</p><p>価格 300万円</p></main></body></html>",
+        encoding="utf-8",
+    )
+    (case / "meta.json").write_text(
+        '{"url": "https://akiya.example/bukken/7", "kind": "listing_detail", '
+        '"key_field": "listing_no"}',
+        encoding="utf-8",
+    )
+    (case / "llm_response.json").write_text('{"listings": []}', encoding="utf-8")
+    (case / "expected.json").write_text(
+        '{"records": [{"listing_no": "7", "price": 3000000}]}', encoding="utf-8"
+    )
+    fresh = FixtureProvider([{"listings": [{"listing_no_quote": "7", "price_quote": "300万円"}]}])
+    result = commands.cmd_eval(rt, record=True, provider=fresh)
+    assert result.cases == 1 and result.accuracy["price"].correct == 1
+    assert result.recorded[0]["case"] == "case1"
+    assert '"price_quote": "300万円"' in (case / "llm_response.json").read_text(encoding="utf-8")
+    assert (case / "llm_response.previous.json").read_text(
+        encoding="utf-8"
+    ).strip() == '{"listings": []}'

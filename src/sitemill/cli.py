@@ -133,9 +133,23 @@ def run(root: RootOpt = None, source: SourceOpt = None) -> None:
 
 
 @app.command(name="eval")
-def eval_cmd(root: RootOpt = None) -> None:
-    """保存済み fixture で抽出精度を計測する（外部アクセスなし）。"""
-    result = commands.cmd_eval(_runtime(root))
+def eval_cmd(
+    root: RootOpt = None,
+    record: Annotated[
+        bool, typer.Option("--record", help="本番の LLM で応答を取り直して fixture に保存する")
+    ] = False,
+) -> None:
+    """保存済み fixture で抽出精度を計測する（--record 以外は外部アクセスなし）。"""
+    try:
+        result = commands.cmd_eval(_runtime(root), record=record)
+    except SecretsError as e:
+        typer.echo(f"停止: {e}", err=True)
+        raise typer.Exit(code=3) from e
+    for r in result.recorded:
+        typer.echo(
+            f"recorded {r['case']}: model={r['model']} "
+            f"in={r['input_tokens']} out={r['output_tokens']}"
+        )
     typer.echo(result.table())
 
 

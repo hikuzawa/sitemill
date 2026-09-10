@@ -16,10 +16,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from sitemill.extract.llm.base import LLMProvider
 from sitemill.extract.llm.fixture import FixtureProvider
 from sitemill.extract.pipeline import extract_page, prepare_input
 from sitemill.extract.spec import ExtractionSpec
 from sitemill.metrics.extraction import ExtractionMetrics
+from sitemill.store.jsonio import write_json
 
 
 @dataclass
@@ -86,6 +88,7 @@ class EvalResult:
     mismatches: list[dict[str, Any]] = field(default_factory=list)
     unmatched_expected: list[str] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
+    recorded: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -98,6 +101,7 @@ class EvalResult:
             "mismatches": self.mismatches,
             "unmatched_expected": self.unmatched_expected,
             "skipped": self.skipped,
+            "recorded": self.recorded,
         }
 
     def table(self) -> str:
@@ -167,3 +171,49 @@ def run_eval(
                         }
                     )
     return result
+
+
+def record_responses(
+    cases: list[EvalCase],
+    spec_for_kind: Callable[[str], ExtractionSpec | None],
+    provider: LLMProvider,
+    *,
+    model: str,
+    root: Path,
+    max_tokens: int = 16_000,
+    temperature: float | None = 0.0,
+    max_chars: int = 60_000,
+) -> list[dict[str, Any]]:
+    """本番プロバイダで応答を取り直し llm_response.json に保存する（前の応答は .previous.json）。"""
+    written: list[dict[str, Any]] = []
+    for case in cases:
+        spec = spec_for_kind(case.kind)
+        if spec is None:
+            continue
+        page = prepare_input(
+            case.html, url=case.url, kind=case.kind, selector=case.selector, max_chars=max_chars
+        )
+        result = provider.complete_json(
+            system=spec.system_prompt,
+            user=spec.user_prompt(url=page.url, kind=page.kind, text=page.text),
+            schema=spec.output_schema,
+            model=model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+        case_dir = root / case.name
+        target = case_dir / "llm_response.json"
+        if target.is_file():
+            target.replace(case_dir / "llm_response.previous.json")
+        write_json(target, result.data)
+        case.llm_response = result.data
+        written.append(
+            {
+                "case": case.name,
+                "model": result.model,
+                "input_tokens": result.input_tokens,
+                "output_tokens": result.output_tokens,
+                "cached": result.cached,
+            }
+        )
+    return written

@@ -16,7 +16,7 @@ from sitemill.extract.pipeline import extract_page, prepare_input
 from sitemill.fetch.client import PoliteClient
 from sitemill.fetch.crawler import crawl_source
 from sitemill.fetch.discover import discover_source
-from sitemill.metrics.evalcases import EvalResult, load_eval_cases, run_eval
+from sitemill.metrics.evalcases import EvalResult, load_eval_cases, record_responses, run_eval
 from sitemill.metrics.extraction import ExtractionMetrics
 from sitemill.metrics.reports import new_report, save_report
 from sitemill.models import ExtractorInfo, Provenance, RunReport, Source, utcnow
@@ -235,12 +235,37 @@ def cmd_run(rt: Runtime, source_ids: list[str] | None = None) -> list[RunReport]
     return [cmd_crawl(rt, source_ids), cmd_extract(rt, source_ids), cmd_build(rt)]
 
 
-def cmd_eval(rt: Runtime, *, model: str = "fixture") -> EvalResult:
+def cmd_eval(
+    rt: Runtime,
+    *,
+    model: str = "fixture",
+    record: bool = False,
+    provider: LLMProvider | None = None,
+) -> EvalResult:
+    """保存済み fixture で抽出精度を計測する。record=True なら本番の応答を取り直してから計測。"""
     eval_dir = rt.service.eval_dir(rt.ws) or (rt.ws.fixtures_dir / "eval")
     cases = load_eval_cases(eval_dir)
+    llm_cfg = rt.ws.site.llm
+    recorded: list[dict[str, Any]] = []
+    if record:
+        if provider is None:
+            name = rt.ws.secrets.sitemill_llm_provider or llm_cfg.provider
+            provider = make_provider(name, secrets=rt.ws.secrets, cache_dir=rt.ws.llm_cache_dir)
+        recorded = record_responses(
+            cases,
+            rt.service.extraction_spec,
+            provider,
+            model=llm_cfg.model,
+            root=eval_dir,
+            max_tokens=llm_cfg.max_output_tokens,
+            temperature=llm_cfg.temperature,
+            max_chars=llm_cfg.max_input_chars,
+        )
+        model = llm_cfg.model
     result = run_eval(
-        cases, rt.service.extraction_spec, model=model, max_chars=rt.ws.site.llm.max_input_chars
+        cases, rt.service.extraction_spec, model=model, max_chars=llm_cfg.max_input_chars
     )
+    result.recorded = recorded
     stamp = utcnow().strftime("%Y%m%d-%H%M%S")
     write_json(rt.ws.runs_dir / f"{stamp}-eval.json", result.to_dict())
     write_json(rt.ws.runs_dir / "latest-eval.json", result.to_dict())
