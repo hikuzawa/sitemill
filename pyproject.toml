@@ -4,6 +4,8 @@ version = "0.1.0"
 description = "公的・公式サイトを監視→差分検知→構造化→静的サイト生成→デプロイ→計測する共通エンジン"
 readme = "README.md"
 requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
 dependencies = [
     "httpx>=0.27",
     "protego>=0.3",
