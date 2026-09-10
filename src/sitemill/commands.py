@@ -220,6 +220,14 @@ def cmd_extract(
     return report
 
 
+def cmd_finalize(rt: Runtime) -> RunReport:
+    """抽出後の後処理だけを実行する（サービスの finalize: stale 判定や所在地の正規化など）。"""
+    report = new_report(rt.service.id, "finalize")
+    rt.service.finalize(rt.ws, now=utcnow())
+    save_report(rt.ws.runs_dir, report)
+    return report
+
+
 def cmd_build(rt: Runtime) -> RunReport:
     report = new_report(rt.service.id, "build")
     result = SiteBuilder(rt.ws, rt.service).build()

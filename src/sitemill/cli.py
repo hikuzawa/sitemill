@@ -107,6 +107,12 @@ def extract(
 
 
 @app.command()
+def finalize(root: RootOpt = None) -> None:
+    """抽出後の後処理だけを実行する（stale 判定、所在地の正規化などサービスの finalize）。"""
+    _report(commands.cmd_finalize(_runtime(root)))
+
+
+@app.command()
 def build(root: RootOpt = None) -> None:
     """静的サイトを dist/ に生成する。信頼シグナルが欠けたページがあれば失敗する。"""
     try:
