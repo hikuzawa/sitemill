@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -93,26 +95,61 @@ def cmd_crawl(
     *,
     force: bool = False,
     max_pages: int | None = None,
+    workers: int | None = None,
 ) -> RunReport:
+    """robots と間隔を守って巡回する。source（≒ホスト）単位で並列に取得する（ADR 0013）。
+
+    1 ホストあたりの間隔は PoliteClient のホスト別ロックが守るので、並列でも縮まらない。
+    巡回状態は全 source が終わってからまとめて保存する（並列中に直列化しない）。
+    """
     report = new_report(rt.service.id, "crawl")
     state = CrawlState.load(rt.state_path)
     raw = RawCache(rt.ws.raw_dir)
     limit = max_pages or rt.ws.site.crawl.max_pages_per_source
+    workers = max(1, workers or rt.ws.site.crawl.max_workers)
+    sources = rt.sources(source_ids)
+    crawlable = [s for s in sources if s.crawlable]
+    for _ in range(len(sources) - len(crawlable)):
+        report.bump("crawl", "skipped_link_only")
     with rt.client() as client:
-        for src in rt.sources(source_ids):
-            if not src.crawlable:
-                report.bump("crawl", "skipped_link_only")
-                continue
-            summary = crawl_source(src, client, state, raw, max_pages=limit, force=force)
+
+        def one(src: Source) -> Any:
+            return crawl_source(src, client, state, raw, max_pages=limit, force=force)
+
+        try:
+            if workers > 1 and len(crawlable) > 1:
+                with ThreadPoolExecutor(max_workers=workers) as pool:
+                    summaries = list(pool.map(one, crawlable))
+            else:
+                summaries = [one(src) for src in crawlable]
+        finally:
+            state.save(rt.state_path)
+        for summary in summaries:
             for key in ("fetched", "changed", "unchanged", "not_modified", "errors"):
                 report.bump("crawl", key, summary.count(key))
             for page in summary.pages:
                 if page.error and not page.not_modified:
                     report.errors.append(f"{page.url}: {page.error}")
-            state.save(rt.state_path)
         report.bump("crawl", "requests", client.request_count)
+        report.bump("crawl", "workers", workers)
     save_report(rt.ws.runs_dir, report)
     return report
+
+
+class _Budget:
+    """並列 extract で「処理するページ数の上限」を全体で共有するカウンタ。"""
+
+    def __init__(self, limit: int | None) -> None:
+        self.limit = limit
+        self.used = 0
+        self._lock = threading.Lock()
+
+    def take(self) -> bool:
+        with self._lock:
+            if self.limit is not None and self.used >= self.limit:
+                return False
+            self.used += 1
+            return True
 
 
 def _provenance(st: Any, src: Source, spec_version: str, ext: Any, now: datetime) -> Provenance:
@@ -141,8 +178,13 @@ def cmd_extract(
     all_pages: bool = False,
     limit: int | None = None,
     provider: LLMProvider | None = None,
+    workers: int | None = None,
 ) -> RunReport:
-    """変化したページ（pending_extract）だけを LLM に渡し、サービスにレコードを取り込ませる。"""
+    """変化したページ（pending_extract）だけを LLM に渡し、サービスにレコードを取り込ませる。
+
+    source 単位で並列化する（1 source 内は順次）。レコード店は source ごとのファイルなので
+    競合しない。集計（report / metrics）は主スレッドで行う。
+    """
     report = new_report(rt.service.id, "extract")
     ws = rt.ws
     llm_cfg = ws.site.llm
@@ -153,25 +195,30 @@ def cmd_extract(
     raw = RawCache(ws.raw_dir)
     metrics = ExtractionMetrics()
     now = utcnow()
-    processed = 0
+    workers = max(1, workers or ws.site.crawl.max_workers)
+    sources = [s for s in rt.sources(source_ids) if s.crawlable]
+    budget = _Budget(limit)
 
-    for src in rt.sources(source_ids):
-        if not src.crawlable:
-            continue
+    def run_source(src: Source) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
         for st in state.for_source(src.id):
-            if limit is not None and processed >= limit:
-                break
             if st.error is not None or not (st.pending_extract or all_pages):
                 continue
+            if not budget.take():
+                break
             spec = rt.service.extraction_spec(st.kind)
             if spec is None:
                 st.pending_extract = False
-                report.bump("extract", "no_spec")
+                out.append({"bump": ("extract", "no_spec")})
                 continue
             html = raw.load_text(src.id, st.url)
             if html is None:
-                report.errors.append(f"{st.url}: 生 HTML のキャッシュがない。先に crawl を実行する")
-                report.bump("extract", "missing_cache")
+                out.append(
+                    {
+                        "error": f"{st.url}: 生 HTML のキャッシュがない。先に crawl を実行する",
+                        "bump": ("extract", "missing_cache"),
+                    }
+                )
                 continue
             page = prepare_input(
                 html,
@@ -190,17 +237,40 @@ def cmd_extract(
                     temperature=llm_cfg.temperature,
                 )
             except LLMError as e:
-                report.errors.append(f"{st.url}: {e}")
-                report.bump("extract", "llm_errors")
+                out.append({"error": f"{st.url}: {e}", "bump": ("extract", "llm_errors")})
                 continue
-            processed += 1
             provenance = _provenance(st, src, spec.prompt_version, ext, now)
             counts = rt.service.ingest(
                 ws, source=src, url=st.url, kind=st.kind, items=ext.items, provenance=provenance
             )
+            st.pending_extract = False
+            st.extracted_hash = st.content_hash
+            st.extracted_at = now
+            st.prompt_version = spec.prompt_version
+            out.append({"ext": ext, "counts": counts})
+        return out
+
+    try:
+        if workers > 1 and len(sources) > 1:
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                results = list(pool.map(run_source, sources))
+        else:
+            results = [run_source(src) for src in sources]
+    finally:
+        state.save(rt.state_path)
+
+    for rows in results:
+        for row in rows:
+            if "error" in row:
+                report.errors.append(row["error"])
+            if "bump" in row:
+                report.bump(*row["bump"])
+            ext = row.get("ext")
+            if ext is None:
+                continue
             report.bump("extract", "pages")
             report.bump("extract", "items", len(ext.items))
-            for key, n in counts.items():
+            for key, n in row["counts"].items():
                 report.bump("ingest", key, n)
             report.llm.add(
                 input_tokens=ext.llm.input_tokens or 0,
@@ -208,11 +278,6 @@ def cmd_extract(
                 cached=ext.llm.cached,
             )
             metrics.merge(ext.metrics)
-            st.pending_extract = False
-            st.extracted_hash = st.content_hash
-            st.extracted_at = now
-            st.prompt_version = spec.prompt_version
-        state.save(rt.state_path)
 
     rt.service.finalize(ws, now=now)
     report.extraction_metrics = metrics.model_dump(mode="json")
@@ -272,11 +337,13 @@ def cmd_heal(rt: Runtime, source_ids: list[str] | None = None) -> RunReport:
     return report
 
 
-def cmd_run(rt: Runtime, source_ids: list[str] | None = None) -> list[RunReport]:
+def cmd_run(
+    rt: Runtime, source_ids: list[str] | None = None, *, workers: int | None = None
+) -> list[RunReport]:
     """crawl → extract → heal → build。discover は候補の確認が要るため含めない。"""
     return [
-        cmd_crawl(rt, source_ids),
-        cmd_extract(rt, source_ids),
+        cmd_crawl(rt, source_ids, workers=workers),
+        cmd_extract(rt, source_ids, workers=workers),
         cmd_heal(rt, source_ids),
         cmd_build(rt),
     ]

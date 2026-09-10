@@ -20,6 +20,10 @@ app = typer.Typer(
 
 RootOpt = Annotated[Path | None, typer.Option("--root", "-r", help="site.toml のあるディレクトリ")]
 SourceOpt = Annotated[list[str] | None, typer.Option("--source", "-s", help="対象 source id")]
+WorkersOpt = Annotated[
+    int | None,
+    typer.Option("--workers", "-w", help="ホスト並列数（既定は site.toml の crawl.max_workers）"),
+]
 
 
 def _runtime(root: Path | None) -> commands.Runtime:
@@ -77,9 +81,14 @@ def crawl(
     max_pages: Annotated[
         int | None, typer.Option("--max-pages", help="Source あたりの上限")
     ] = None,
+    workers: WorkersOpt = None,
 ) -> None:
     """robots と間隔を守って巡回し、変化したページに印を付ける。"""
-    _report(commands.cmd_crawl(_runtime(root), source, force=force, max_pages=max_pages))
+    _report(
+        commands.cmd_crawl(
+            _runtime(root), source, force=force, max_pages=max_pages, workers=workers
+        )
+    )
 
 
 @app.command()
@@ -88,11 +97,12 @@ def extract(
     source: SourceOpt = None,
     all_pages: Annotated[bool, typer.Option("--all", help="変化の有無に関わらず全ページ")] = False,
     limit: Annotated[int | None, typer.Option("--limit", help="処理するページ数の上限")] = None,
+    workers: WorkersOpt = None,
 ) -> None:
     """変化したページを LLM で構造化し、レコードに取り込む。"""
     rt = _runtime(root)
     try:
-        report = commands.cmd_extract(rt, source, all_pages=all_pages, limit=limit)
+        report = commands.cmd_extract(rt, source, all_pages=all_pages, limit=limit, workers=workers)
     except SecretsError as e:
         typer.echo(f"停止: {e}", err=True)
         raise typer.Exit(code=3) from e
@@ -137,11 +147,11 @@ def build(root: RootOpt = None) -> None:
 
 
 @app.command()
-def run(root: RootOpt = None, source: SourceOpt = None) -> None:
-    """crawl → extract → build をまとめて実行する。"""
+def run(root: RootOpt = None, source: SourceOpt = None, workers: WorkersOpt = None) -> None:
+    """crawl → extract → heal → build をまとめて実行する。"""
     rt = _runtime(root)
     try:
-        for report in commands.cmd_run(rt, source):
+        for report in commands.cmd_run(rt, source, workers=workers):
             typer.echo(f"== {report.command} ==")
             _report(report)
     except SecretsError as e:

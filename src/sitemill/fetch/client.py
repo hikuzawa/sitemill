@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import random
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -82,6 +83,22 @@ class PoliteClient:
         self.robots = RobotsCache(self._fetch_robots, user_agent)
         self._last_request: dict[str, float] = {}
         self.request_count = 0
+        # スレッド安全性（ADR 0013）: ホストごとの再入可能ロックで「同一ホストは同時 1 リクエスト、
+        # 間隔はロック保持中に enforce」を守る。別ホストは並行できる。
+        self._host_locks: dict[str, threading.RLock] = {}
+        self._locks_guard = threading.Lock()
+        self._count_lock = threading.Lock()
+
+    def _host_lock(self, host: str) -> threading.RLock:
+        with self._locks_guard:
+            lock = self._host_locks.get(host)
+            if lock is None:
+                lock = self._host_locks[host] = threading.RLock()
+            return lock
+
+    def _bump(self) -> None:
+        with self._count_lock:
+            self.request_count += 1
 
     def close(self) -> None:
         self._client.close()
@@ -109,7 +126,7 @@ class PoliteClient:
         except httpx.HTTPError as e:
             log.warning("robots.txt 取得失敗 %s: %s", url, e)
             return None
-        self.request_count += 1
+        self._bump()
         return resp.status_code, resp.content
 
     def _request(self, url: str, headers: dict[str, str]) -> httpx.Response:
@@ -117,11 +134,11 @@ class PoliteClient:
         while True:
             try:
                 resp = self._client.get(url, headers=headers)
-                self.request_count += 1
+                self._bump()
                 if resp.status_code < 500 or attempt >= self.retries:
                     return resp
             except httpx.TransportError:
-                self.request_count += 1
+                self._bump()
                 if attempt >= self.retries:
                     raise
             attempt += 1
@@ -137,6 +154,25 @@ class PoliteClient:
         last_modified: str | None = None,
         delay: float | None = None,
         check_robots: bool = True,
+    ) -> FetchResult:
+        """1 ホストにつき同時 1 リクエスト。別ホストへは複数スレッドから並行して呼べる。"""
+        with self._host_lock(host_of(url)):
+            return self._get_locked(
+                url,
+                etag=etag,
+                last_modified=last_modified,
+                delay=delay,
+                check_robots=check_robots,
+            )
+
+    def _get_locked(
+        self,
+        url: str,
+        *,
+        etag: str | None,
+        last_modified: str | None,
+        delay: float | None,
+        check_robots: bool,
     ) -> FetchResult:
         now = utcnow()
         if check_robots and not self.robots.allowed(url):

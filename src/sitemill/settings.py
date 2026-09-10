@@ -80,6 +80,8 @@ class CrawlConfig(BaseModel):
     timeout_seconds: float = 30.0
     max_pages_per_source: int = 30
     user_agent: str | None = None
+    # ホスト単位の並列数（ADR 0013）。1 ホストあたりの間隔は並列でも縮まらない
+    max_workers: int = 4
 
 
 class LLMConfig(BaseModel):
