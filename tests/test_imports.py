@@ -17,6 +17,8 @@ PACKAGES = [
     "sitemill.license",
     "sitemill.assets",
     "sitemill.metrics",
+    "sitemill.classify",
+    "sitemill.review",
 ]
 
 
