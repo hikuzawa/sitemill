@@ -11,6 +11,7 @@ from enum import StrEnum
 
 from selectolax.parser import HTMLParser
 
+from sitemill.classify.listing_score import listing_score
 from sitemill.classify.platforms import PlatformRegistry
 from sitemill.diff.normalize import page_text
 
@@ -113,20 +114,32 @@ def classify_page(
     fields = [name for name, pat in _FIELD_LABELS if pat.search(text)]
     field_count = len(fields)
     has_table_price = bool(_TABLE_HEADERS.search(html) and re.search(r"所在地|住所", html))
+    ls = listing_score(html, url, content_selector=content_selector)
 
-    signals: dict[str, int | bool | str] = {
+    signals: dict[str, int | bool | str | float] = {
         "price_count": price_count,
         "listing_no_count": listing_no_count,
         "field_count": field_count,
         "body_len": body_len,
         "table_price": has_table_price,
+        **ls.as_signals(),
     }
 
-    # 3) 一覧: 価格表記が複数 or 物件番号が複数
+    # 補助金・ツアー・制度案内のページは「万円」があっても物件ページではない
+    if ls.subsidy_dominant:
+        return ClassifiedPage(
+            url=url,
+            page_class=PageClass.not_listing,
+            confidence=_clip(0.6 + min(ls.subsidy_hits, 20) * 0.015),
+            signals=signals,
+            evidence=[f"補助金・制度案内の語が {ls.subsidy_hits} 件で、物件行が {ls.rows} 件"],
+        )
+
+    # 3) 一覧: 物件行（価格＋面積・築年・所在地などの属性）が複数
     index_score = 0.0
-    if price_count >= 3:
-        index_score = 0.55 + min(price_count, 20) * 0.02
-    elif price_count >= 1 and listing_no_count >= 2:
+    if ls.is_listing:
+        index_score = 0.55 + min(ls.rows, 20) * 0.02
+    elif ls.property_prices >= 1 and listing_no_count >= 2:
         index_score = 0.5 + listing_no_count * 0.02
 
     # 4) 詳細: 単一物件（価格が少なく、項目ラベルがそろう）
@@ -147,7 +160,7 @@ def classify_page(
             page_class=PageClass.listing_index,
             confidence=conf,
             signals=signals,
-            evidence=[f"価格表記 {price_count} 件・物件番号 {listing_no_count} 件"],
+            evidence=[f"価格表記 {price_count} 件・物件番号 {listing_no_count} 件", *ls.evidence],
         )
     if detail_score > 0:
         conf = _clip(detail_score - (index_score * 0.3))

@@ -113,6 +113,20 @@ def finalize(root: RootOpt = None) -> None:
 
 
 @app.command()
+def heal(root: RootOpt = None, source: SourceOpt = None) -> None:
+    """巡回しても成果が 0 件の source を再評価し、より良い候補に差し替えるか状態を見直す。"""
+    rt = _runtime(root)
+    try:
+        report = commands.cmd_heal(rt, source)
+    except SecretsError as e:
+        typer.echo(f"停止: {e}", err=True)
+        raise typer.Exit(code=3) from e
+    _report(report)
+    for note in report.notes:
+        typer.echo(f"  - {note}")
+
+
+@app.command()
 def build(root: RootOpt = None) -> None:
     """静的サイトを dist/ に生成する。信頼シグナルが欠けたページがあれば失敗する。"""
     try:

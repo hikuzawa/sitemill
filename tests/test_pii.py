@@ -69,3 +69,10 @@ def test_allow_also_whitelists_operator_contact() -> None:
 def test_normalize_phone() -> None:
     assert normalize_phone("０２６８ー６２ー１１１１") == "0268621111"
     assert normalize_phone("(0268) 62-1111") == "0268621111"
+
+
+def test_compound_words_with_honorific_chars_are_not_names() -> None:
+    policy = default_jp_gov_policy()
+    # 「様式」「氏名」は敬称ではない
+    assert scan_text("別紙様式を提出してください。申請者氏名を記入。", policy=policy) == []
+    assert _kinds("担当は山田様です", policy=policy) == ["name"]

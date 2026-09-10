@@ -238,9 +238,48 @@ def cmd_build(rt: Runtime) -> RunReport:
     return report
 
 
+def cmd_heal(rt: Runtime, source_ids: list[str] | None = None) -> RunReport:
+    """巡回したのに成果が 0 件の source を自己修復する（サービスの `heal` フック）。
+
+    サービスが `heal(ws, *, client, source_ids) -> dict` を実装していれば呼ぶ。返り値は
+    {"changed": [説明...], "recrawl": [source id...], "downgraded": [source id...]} を期待し、
+    差し替えた source はその場で crawl→extract し直す（build はこの後の工程で行う）。
+    """
+    report = new_report(rt.service.id, "heal")
+    hook = getattr(rt.service, "heal", None)
+    if hook is None:
+        report.notes.append("サービスに heal フックが無いため何もしない")
+        save_report(rt.ws.runs_dir, report)
+        return report
+    with rt.client() as client:
+        result: dict[str, Any] = hook(rt.ws, client=client, source_ids=source_ids) or {}
+        report.bump("heal", "requests", client.request_count)
+    for line in result.get("changed", []):
+        report.notes.append(str(line))
+    recrawl = [str(s) for s in result.get("recrawl", [])]
+    report.bump("heal", "checked", int(result.get("checked", 0)))
+    report.bump("heal", "swapped", len(recrawl))
+    report.bump("heal", "downgraded", len(result.get("downgraded", [])))
+    if recrawl:
+        crawl = cmd_crawl(rt, recrawl, force=True)
+        extract = cmd_extract(rt, recrawl)
+        for key in ("fetched", "errors"):
+            report.bump("recrawl", key, crawl.stages.get("crawl", {}).get(key, 0))
+        for key in ("pages", "items"):
+            report.bump("recrawl", key, extract.stages.get("extract", {}).get(key, 0))
+        report.errors.extend(crawl.errors + extract.errors)
+    save_report(rt.ws.runs_dir, report)
+    return report
+
+
 def cmd_run(rt: Runtime, source_ids: list[str] | None = None) -> list[RunReport]:
-    """crawl → extract → build。discover は候補の確認が要るため含めない。"""
-    return [cmd_crawl(rt, source_ids), cmd_extract(rt, source_ids), cmd_build(rt)]
+    """crawl → extract → heal → build。discover は候補の確認が要るため含めない。"""
+    return [
+        cmd_crawl(rt, source_ids),
+        cmd_extract(rt, source_ids),
+        cmd_heal(rt, source_ids),
+        cmd_build(rt),
+    ]
 
 
 def cmd_eval(
