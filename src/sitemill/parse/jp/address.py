@@ -12,22 +12,28 @@ import unicodedata
 _KANJI = "〇一二三四五六七八九十百千"
 # 「3丁目」「一丁目」は地区として残す
 _CHOME = re.compile(rf"(?:\d+|[{_KANJI}]+)丁目")
-# ここから先は番地・号・建物名: 算用数字、または 番地/番/号 が続く漢数字。
+# ここから先は番地・号・建物名: 算用数字、または 番地/号 が続く漢数字。
+# 「二番町」等の地名を誤除去しないため、漢数字＋単独の「番」は番地とみなさない。
 # 直前の 甲乙丙丁戊 や「字」も一緒に落とす
-_STREET = re.compile(rf"[\s　]*(?:字\s*)?(?:[甲乙丙丁戊]\s*)?(?:\d|[{_KANJI}]+(?:番地|番|号))")
-_TRAIL = re.compile(r"[\s　\-－‐‑–—ー・,、。／/]+$")
+_STREET = re.compile(rf"[\s　]*(?:字\s*)?(?:[甲乙丙丁戊]\s*)?(?:\d|[{_KANJI}]+(?:番地|号))")
+_TRAIL = re.compile(r"[\s　\-‐‑–—ー・,、。／/]+$")
+_DASHES = str.maketrans({"‐": "-", "‑": "-", "−": "-"})
+
+
+def _norm(text: str) -> str:
+    return unicodedata.normalize("NFKC", text).translate(_DASHES)
 
 
 def has_street_number(text: str) -> bool:
     """番地らしき部分（算用数字、または 番地/番/号 付きの漢数字）が含まれるか。"""
-    t = unicodedata.normalize("NFKC", text)
+    t = _norm(text)
     t = _CHOME.sub("丁目", t)  # 丁目の数字は対象外
     return bool(_STREET.search(t))
 
 
 def strip_street_number(address: str) -> tuple[str, str | None]:
     """(残した部分, 落とした部分) を返す。落とすものが無ければ (正規化した元の文字列, None)。"""
-    t = unicodedata.normalize("NFKC", address).strip()
+    t = _norm(address).strip()
     if not t:
         return "", None
     cut_from = len(t)
