@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import re
 import shutil
 import subprocess
 from dataclasses import dataclass, field
@@ -11,8 +10,6 @@ from pathlib import Path
 
 MAX_FILE_BYTES = 25 * 1024 * 1024
 MAX_FILES = 20_000
-# _redirects の source は「/パス」またはドメイン単位（www.example.com/* など）を許す
-_HOST_SOURCE = re.compile(r"^(?:https?://)?(?:[A-Za-z0-9-]+\.)+[A-Za-z]{2,}(?::\d+)?/")
 
 
 @dataclass
@@ -51,7 +48,7 @@ def check_dist(dist: Path) -> DeployPlan:
             parts = line.split()
             if not parts or line.startswith("#"):
                 continue
-            if len(parts) < 2 or not (parts[0].startswith("/") or _HOST_SOURCE.match(parts[0])):
+            if len(parts) < 2 or not parts[0].startswith("/"):
                 plan.problems.append(f"_redirects {n} 行目の書式が不正: {line!r}")
     plan.notes.append(f"{plan.files} files, {plan.total_bytes / 1024:.0f} KB")
     return plan
