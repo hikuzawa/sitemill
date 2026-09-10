@@ -12,7 +12,8 @@
 
 ## コマンド
 - `uv sync` 依存を入れる / `uv run pytest` / `uv run ruff check src tests` / `uv run ruff format src tests`
-- CLI はサービス側のルート（site.toml のある場所）で `uv run sitemill <discover|crawl|extract|build|deploy|run|eval>` を実行する
+- CLI はサービス側のルート（site.toml のある場所）で `uv run sitemill <discover|crawl|extract|build|deploy|run|eval|status>` を実行する
+- `uv run sitemill eval --record` は本番の LLM で fixture の応答を取り直してから計測する（旧応答は llm_response.previous.json に残る）
 
 ## 守ること
 - 汎用ロジックだけを置く。特定サービスの URL・スキーマ・テンプレートはサービス側へ
