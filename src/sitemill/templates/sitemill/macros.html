@@ -28,6 +28,23 @@
 </section>
 {% endmacro %}
 
+{% macro head_meta(meta, site, base_url, analytics="", site_verification=none) %}
+<link rel="canonical" href="{{ base_url }}{{ meta.url_path }}">
+{% if meta.noindex %}<meta name="robots" content="noindex">{% endif %}
+{% if site_verification %}<meta name="google-site-verification" content="{{ site_verification }}">{% endif %}
+<meta property="og:type" content="{{ meta.og_type }}">
+<meta property="og:title" content="{{ meta.title }}">
+<meta property="og:description" content="{{ meta.description }}">
+<meta property="og:url" content="{{ base_url }}{{ meta.url_path }}">
+<meta property="og:site_name" content="{{ site.name }}">
+<meta property="og:locale" content="ja_JP">
+<meta name="twitter:card" content="summary">
+{% for node in meta.structured_data %}
+<script type="application/ld+json">{{ node|tojson }}</script>
+{% endfor %}
+{{ analytics }}
+{% endmacro %}
+
 {% macro field(label, fv, formatter=none) %}
 <dt>{{ label }}</dt>
 <dd>

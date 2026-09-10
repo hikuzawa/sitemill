@@ -70,10 +70,13 @@ def test_crawl_extract_build_end_to_end(rt: commands.Runtime) -> None:
     assert "extract" not in again.stages or again.stages["extract"].get("pages", 0) == 0
 
     build = commands.cmd_build(rt)
-    assert build.stages["build"]["pages"] == 1
+    assert build.stages["build"]["pages"] == 3  # index + about + 404
     dist = rt.ws.dist_dir
     html = (dist / "index.html").read_text(encoding="utf-8")
     assert "data-sitemill-trust" in html and "テスト運営" in html and "1,200万円" in html
+    assert 'rel="canonical"' in html and 'property="og:title"' in html
+    assert "application/ld+json" in html
+    assert (dist / "404.html").is_file() and (dist / "about" / "index.html").is_file()
     assert (dist / "static" / "style.css").is_file()
     assert (dist / "search" / "index.json").read_text(encoding="utf-8").count('"no"') == 2
     assert "https://dummy.example/" in (dist / "sitemap.xml").read_text(encoding="utf-8")

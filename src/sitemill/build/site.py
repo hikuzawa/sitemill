@@ -18,6 +18,8 @@ from jinja2 import (
 )
 from markupsafe import Markup
 
+from sitemill.build import preflight
+from sitemill.build.pii import PiiPolicy, allow_also, default_jp_gov_policy, scan_text
 from sitemill.build.trust import verify_page_html
 from sitemill.charts import Chart
 from sitemill.embeds import render_embed
@@ -129,16 +131,31 @@ class SiteBuilder:
             site=ws.site,
             base_url=ws.site.base_url,
             analytics=Markup(analytics),
+            site_verification=ws.secrets.google_site_verification or "",
             build_time=self.now,
             url_for=ws.site.url,
         )
+        maker = getattr(service, "pii_policy", None)
+        base_policy: PiiPolicy = (maker(ws) if maker else None) or default_jp_gov_policy()
+        # 運営者自身の連絡先は第三者の個人情報ではないので許可する。
+        contact = (ws.site.operator.contact or "").strip()
+        self.pii_policy = allow_also(base_policy, emails=[contact], phones=[contact])
 
     def render_page(self, page: Page) -> str:
         template = self.env.get_template(page.template)
         html = template.render(page=page, meta=page.meta, trust=page.trust, **page.context)
         problems = verify_page_html(html)
+        problems += preflight.check_page_html(html, path=page.meta.path, noindex=page.meta.noindex)
         if problems:
             raise BuildError(f"{page.meta.path}: {'; '.join(problems)}")
+        pii = scan_text(
+            preflight.visible_text_and_contacts(html),
+            policy=self.pii_policy,
+            where=page.meta.path,
+        )
+        if pii:
+            details = "; ".join(f.describe() for f in pii[:5])
+            raise BuildError(f"個人情報らしき文字列がページに含まれる: {details}")
         return html
 
     def build(self) -> BuildResult:
@@ -189,6 +206,19 @@ class SiteBuilder:
             "  X-Frame-Options: SAMEORIGIN\n",
         )
         result.files.extend(["sitemap.xml", "robots.txt", "_redirects", "_headers"])
+
+        # Search Console 等の検証ファイルを置ける仕組み: verification/ の中身を dist 直下へ複写。
+        vdir = ws.root / "verification"
+        if vdir.is_dir():
+            for f in sorted(vdir.iterdir()):
+                if f.is_file() and f.name != "README.md" and not f.name.startswith("."):
+                    shutil.copy2(f, dist / f.name)
+                    result.files.append(f.name)
+                    result.warnings.append(f"検証ファイルを配置: /{f.name}")
+
+        problems = preflight.check_site(dist, analytics_token=ws.secrets.cf_web_analytics_token)
+        if problems:
+            raise BuildError("公開前チェックに失敗: " + "; ".join(problems))
         log.info("build: %d pages → %s", result.pages, dist)
         return result
 

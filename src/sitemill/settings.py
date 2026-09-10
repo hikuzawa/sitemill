@@ -30,6 +30,7 @@ class Secrets(BaseSettings):
     cloudflare_api_token: str | None = None
     cloudflare_account_id: str | None = None
     cf_web_analytics_token: str | None = None
+    google_site_verification: str | None = None
     sitemill_llm_provider: str | None = None
 
     @field_validator("*", mode="before")

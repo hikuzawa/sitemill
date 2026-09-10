@@ -37,6 +37,8 @@ class PageMeta(BaseModel):
     noindex: bool = False
     changefreq: str = "weekly"
     priority: float = 0.5
+    og_type: str = "website"  # OGP の og:type
+    structured_data: list[dict[str, Any]] = Field(default_factory=list)  # JSON-LD ノード
 
     @property
     def url_path(self) -> str:

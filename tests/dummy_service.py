@@ -119,13 +119,26 @@ class DummyService:
             operator=OperatorInfo(name=ws.site.operator.name, contact=ws.site.operator.contact),
             record_count=len(records),
         )
+        jsonld = [{"@context": "https://schema.org", "@type": "WebSite", "name": ws.site.name}]
         pages = [
             Page(
-                meta=PageMeta(title="トップ", path="index.html", description="テスト"),
+                meta=PageMeta(
+                    title="トップ", path="index.html", description="テスト", structured_data=jsonld
+                ),
                 template="index.html",
                 context={"records": records},
                 trust=trust,
-            )
+            ),
+            Page(
+                meta=PageMeta(title="運営者情報", path="about/index.html", structured_data=jsonld),
+                template="about.html",
+                trust=trust,
+            ),
+            Page(
+                meta=PageMeta(title="404", path="404.html", noindex=True),
+                template="404.html",
+                trust=trust,
+            ),
         ]
         if (ws.templates_dir / "broken.html").is_file():
             pages.append(
@@ -168,10 +181,12 @@ jitter_seconds = 0
 provider = "fixture"
 """
 
-BASE_TEMPLATE = """<!doctype html>
+BASE_TEMPLATE = """{% import "sitemill/macros.html" as sm %}<!doctype html>
 <html lang="ja"><head><meta charset="utf-8">
-<title>{{ meta.title }} | {{ site.name }}</title>{{ analytics }}</head>
-<body>{% import "sitemill/macros.html" as sm %}
+<title>{{ meta.title }} | {{ site.name }}</title>
+{{ sm.head_meta(meta, site, base_url, analytics=analytics, site_verification=site_verification) }}
+</head>
+<body>
 <main>{% block content %}{% endblock %}</main>
 {{ sm.trust_block(trust) }}
 </body></html>
@@ -183,6 +198,18 @@ INDEX_TEMPLATE = """{% extends "base.html" %}
 {% endblock %}
 """
 
+ABOUT_TEMPLATE = """{% extends "base.html" %}
+{% block content %}<h1>運営者情報</h1>
+<p>運営者: {{ site.operator.name }}</p>
+<h2>免責</h2><p>内容の正確性は保証しません。</p>
+{% endblock %}
+"""
+
+NOTFOUND_TEMPLATE = """{% extends "base.html" %}
+{% block content %}<h1>ページが見つかりません</h1><p><a href="/">トップ</a></p>
+{% endblock %}
+"""
+
 
 def make_workspace(root: Path) -> Path:
     """site.toml とテンプレートを持つ最小のサービスルートを作る。"""
@@ -190,6 +217,8 @@ def make_workspace(root: Path) -> Path:
     (root / "templates").mkdir(exist_ok=True)
     (root / "templates" / "base.html").write_text(BASE_TEMPLATE, encoding="utf-8")
     (root / "templates" / "index.html").write_text(INDEX_TEMPLATE, encoding="utf-8")
+    (root / "templates" / "about.html").write_text(ABOUT_TEMPLATE, encoding="utf-8")
+    (root / "templates" / "404.html").write_text(NOTFOUND_TEMPLATE, encoding="utf-8")
     (root / "static").mkdir(exist_ok=True)
     (root / "static" / "style.css").write_text("body{}", encoding="utf-8")
     return root
