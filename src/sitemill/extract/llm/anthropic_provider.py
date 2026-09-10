@@ -36,8 +36,10 @@ class AnthropicProvider:
             "messages": [{"role": "user", "content": user}],
             "output_config": {"format": {"type": "json_schema", "schema": schema}},
         }
+        # SDK 1.x は temperature を型付き引数に持たないので extra_body で渡す。
+        # 4.6 以降の世代のモデルには送らない（400 になる）
         if temperature is not None and supports_sampling(model):
-            kwargs["temperature"] = temperature
+            kwargs["extra_body"] = {"temperature": temperature}
         resp = self._client.messages.create(**kwargs)
         if resp.stop_reason == "refusal":
             raise LLMError("LLM が応答を拒否しました（stop_reason=refusal）")

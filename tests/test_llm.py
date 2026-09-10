@@ -51,7 +51,8 @@ def test_anthropic_provider_builds_structured_output_request() -> None:
     assert kw is not None
     assert kw["output_config"] == {"format": {"type": "json_schema", "schema": {"type": "object"}}}
     assert kw["system"][0]["cache_control"] == {"type": "ephemeral"}
-    assert kw["temperature"] == 0.0 and kw["messages"] == [{"role": "user", "content": "U"}]
+    assert kw["extra_body"] == {"temperature": 0.0}
+    assert kw["messages"] == [{"role": "user", "content": "U"}]
     assert r.data == {"items": []} and r.input_tokens == 10 and r.provider == "anthropic"
 
 
@@ -60,7 +61,7 @@ def test_anthropic_provider_omits_temperature_for_models_without_sampling() -> N
     AnthropicProvider("k", client=client).complete_json(
         model="claude-opus-5", temperature=0.0, **COMMON
     )
-    assert client.messages.kwargs is not None and "temperature" not in client.messages.kwargs
+    assert client.messages.kwargs is not None and "extra_body" not in client.messages.kwargs
     assert supports_sampling("claude-haiku-4-5") and not supports_sampling("claude-sonnet-5")
 
 
