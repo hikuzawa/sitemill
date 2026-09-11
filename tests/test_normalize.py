@@ -43,8 +43,10 @@ def test_page_wrapped_in_one_form_keeps_its_body() -> None:
     """ASP.NET 系 CMS はページ全体を form で囲む。捨てると本文が消える（全国展開で発見）。"""
     from sitemill.diff.normalize import page_text
 
+    # script が本文より長いことがある。form の割合は script を落とした後で測る
     html = (
-        "<html><body><form id='aspnetForm'><h1>空き家バンク物件一覧</h1>"
+        "<html><body><script>" + ("var x=1;" * 400) + "</script>"
+        "<form id='aspnetForm'><h1>空き家バンク物件一覧</h1>"
         "<table><tr><td>No.1</td><td>350万円</td><td>木造 80㎡</td></tr>"
         "<tr><td>No.2</td><td>500万円</td><td>木造 95㎡</td></tr></table>"
         "</form></body></html>"
