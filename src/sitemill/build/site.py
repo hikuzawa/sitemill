@@ -49,10 +49,15 @@ class BuildResult:
 
 
 def yen(value: int | float | None) -> str:
+    """金額の表示。1 万円以上は万円区切り、1 万円未満は円。
+
+    サイト全体でこの 1 つに揃える（Jinja からは `|yen`）。40 万円を「400,000円」と
+    「40万円」で書き分けると、同じ物件が別の額に見えるため。
+    """
     if value is None:
         return "—"
     v = int(round(value))
-    if v < 1_000_000:
+    if v < 10_000:
         return f"{v:,}円"
     oku, rem = divmod(v, 100_000_000)
     man, tail = divmod(rem, 10_000)

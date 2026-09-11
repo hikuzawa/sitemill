@@ -116,7 +116,11 @@ def test_extract_without_api_key_stops_with_env_hint(rt: commands.Runtime) -> No
 
 def test_yen_filter() -> None:
     assert yen(None) == "—"
-    assert yen(68_000) == "68,000円"
+    assert yen(68_000) == "6.8万円"
+    assert yen(400_000) == "40万円"  # 万円区切りに統一（旧: 400,000円）
+    assert yen(9_000) == "9,000円"  # 1 万円未満は円
+    assert yen(10_000) == "1万円"
+    assert yen(0) == "0円"
     assert yen(9_800_000) == "980万円"
     assert yen(12_000_000) == "1,200万円"
     assert yen(120_000_000) == "1億2,000万円"
@@ -172,3 +176,13 @@ def test_eval_record_replaces_fixture_response(rt: commands.Runtime) -> None:
     assert (case / "llm_response.previous.json").read_text(
         encoding="utf-8"
     ).strip() == '{"listings": []}'
+
+
+def test_report_records_whether_it_ran_in_ci(monkeypatch: pytest.MonkeyPatch) -> None:
+    """日次（Actions）と手元の作業を混ぜずに数えるため、実行元を残す。"""
+    from sitemill.metrics.reports import new_report
+
+    monkeypatch.delenv("CI", raising=False)
+    assert new_report("svc", "crawl").ci is False
+    monkeypatch.setenv("CI", "true")
+    assert new_report("svc", "crawl").ci is True

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from sitemill.models import RunReport, utcnow
@@ -9,7 +10,13 @@ from sitemill.store.jsonio import read_json, write_json
 
 
 def new_report(service_id: str, command: str) -> RunReport:
-    return RunReport(service=service_id, command=command, started_at=utcnow())
+    # CI かどうかを残す。日次（Actions）と手元の作業を混ぜずに数えられるようにする
+    return RunReport(
+        service=service_id,
+        command=command,
+        started_at=utcnow(),
+        ci=os.environ.get("CI", "").lower() == "true",
+    )
 
 
 def save_report(runs_dir: Path, report: RunReport) -> Path:

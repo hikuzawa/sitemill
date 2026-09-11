@@ -31,6 +31,7 @@ class RunReport(BaseModel):
     errors: list[str] = Field(default_factory=list)
     extraction_metrics: dict | None = None
     notes: list[str] = Field(default_factory=list)
+    ci: bool = False  # CI（GitHub Actions）での実行か。手元の作業と混ぜて数えないため
 
     def bump(self, stage: str, key: str, n: int = 1) -> None:
         counts = self.stages.setdefault(stage, {})
