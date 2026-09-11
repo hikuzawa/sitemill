@@ -184,10 +184,15 @@ class SiteBuilder:
 
         index: Any = self.service.search_index(ws)
         if index is not None:
-            path = dist / "search" / "index.json"
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(dumps(index, indent=None), encoding="utf-8", newline="\n")
-            result.files.append("search/index.json")
+            # 配列なら search/index.json に、辞書ならキーごとのファイルに書く。全国規模では
+            # 索引が数 MB になるので、サービス側で分割できるようにしている
+            parts = index if isinstance(index, dict) else {"index.json": index}
+            for name, payload in parts.items():
+                rel = f"search/{name}"
+                path = dist / rel
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(dumps(payload, indent=None), encoding="utf-8", newline="\n")
+                result.files.append(rel)
 
         self._write(dist / "sitemap.xml", self._sitemap(pages))
         self._write(
