@@ -33,3 +33,18 @@ def test_has_street_number() -> None:
     assert not has_street_number("松本市大手一丁目")
     assert not has_street_number("飯山市大字飯山")
     assert not has_street_number("六日町")
+
+
+def test_hokkaido_grid_addresses_keep_the_district_and_drop_the_number() -> None:
+    """北海道の「条丁目」は地区の単位。番地だけを落とす（全国展開で見つかった）。"""
+    from sitemill.parse.jp.address import has_street_number, strip_street_number
+
+    assert not has_street_number("砂川市晴見3条北9丁目")
+    assert not has_street_number("札幌市中央区北1条西2丁目")
+    assert strip_street_number("砂川市晴見3条北9丁目") == ("砂川市晴見3条北9丁目", None)
+    assert strip_street_number("砂川市西2条北18丁目1-5") == ("砂川市西2条北18丁目", "1-5")
+    assert has_street_number("砂川市西2条北18丁目1-5")
+    # 判定と切り出しは必ず一致する（食い違うと finalize の検査で止まる）
+    for text in ("砂川市晴見3条北9丁目", "西4条南10丁目", "東御市田中3-2", "五条市本町"):
+        kept, _ = strip_street_number(text)
+        assert not has_street_number(kept), text
