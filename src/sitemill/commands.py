@@ -379,7 +379,8 @@ def cmd_eval(
 ) -> EvalResult:
     """保存済み fixture で抽出精度を計測する。record=True なら本番の応答を取り直してから計測。"""
     eval_dir = rt.service.eval_dir(rt.ws) or (rt.ws.fixtures_dir / "eval")
-    cases = load_eval_cases(eval_dir)
+    # record のときは、まだ応答の無い fixture も読む（読まないと永遠に記録されない）
+    cases = load_eval_cases(eval_dir, require_response=not record)
     llm_cfg = rt.ws.site.llm
     recorded: list[dict[str, Any]] = []
     if record:
@@ -397,6 +398,7 @@ def cmd_eval(
             max_chars=llm_cfg.max_input_chars,
         )
         model = llm_cfg.model
+        cases = load_eval_cases(eval_dir)  # 応答を書いたので読み直す
     result = run_eval(
         cases, rt.service.extraction_spec, model=model, max_chars=llm_cfg.max_input_chars
     )

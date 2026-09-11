@@ -36,13 +36,18 @@ class EvalCase:
     selector: str | None = None
 
 
-def load_eval_cases(root: Path) -> list[EvalCase]:
+def load_eval_cases(root: Path, *, require_response: bool = True) -> list[EvalCase]:
+    """fixture を読む。
+
+    require_response=False のときは、まだ応答が無いケースも読む（`eval --record` で
+    これから応答を取るため）。応答が要るのは計測のときだけ。
+    """
     cases: list[EvalCase] = []
     if not root.is_dir():
         return cases
     for case_dir in sorted(p for p in root.iterdir() if p.is_dir()):
-        required = [case_dir / n for n in ("meta.json", "llm_response.json")]
-        if not all(p.is_file() for p in required):
+        names = ("meta.json", "llm_response.json") if require_response else ("meta.json",)
+        if not all((case_dir / n).is_file() for n in names):
             continue
         meta = json.loads((case_dir / "meta.json").read_text(encoding="utf-8"))
         # html は既定で page.html。共有 fixture を使うときは meta.json の "html" に相対パスを書く
@@ -59,8 +64,10 @@ def load_eval_cases(root: Path) -> list[EvalCase]:
                 url=meta["url"],
                 kind=meta.get("kind", "listing_index"),
                 html=html_path.read_text(encoding="utf-8"),
-                llm_response=json.loads(
-                    (case_dir / "llm_response.json").read_text(encoding="utf-8")
+                llm_response=(
+                    json.loads((case_dir / "llm_response.json").read_text(encoding="utf-8"))
+                    if (case_dir / "llm_response.json").is_file()
+                    else {}
                 ),
                 expected=expected,
                 key_field=meta.get("key_field", "listing_no"),
