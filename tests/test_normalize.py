@@ -37,3 +37,26 @@ def test_select_main_prefers_selector_then_known_ids_then_body() -> None:
 
 def test_squash() -> None:
     assert squash("価格 ５００万円\n") == "価格500万円"
+
+
+def test_page_wrapped_in_one_form_keeps_its_body() -> None:
+    """ASP.NET 系 CMS はページ全体を form で囲む。捨てると本文が消える（全国展開で発見）。"""
+    from sitemill.diff.normalize import page_text
+
+    html = (
+        "<html><body><form id='aspnetForm'><h1>空き家バンク物件一覧</h1>"
+        "<table><tr><td>No.1</td><td>350万円</td><td>木造 80㎡</td></tr>"
+        "<tr><td>No.2</td><td>500万円</td><td>木造 95㎡</td></tr></table>"
+        "</form></body></html>"
+    )
+    text = page_text(html)
+    assert "空き家バンク物件一覧" in text and "350万円" in text
+
+
+def test_small_search_form_is_still_dropped() -> None:
+    from sitemill.diff.normalize import page_text
+
+    body = "<p>" + "本文の説明。" * 40 + "</p>"
+    html = f"<html><body><form><input name='q'>検索</form>{body}</body></html>"
+    text = page_text(html)
+    assert "検索" not in text and "本文の説明" in text

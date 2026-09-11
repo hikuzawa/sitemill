@@ -99,8 +99,20 @@ def select_main(html: str, selector: str | None = None) -> Node:
 
 
 def _strip_noise(root: Node) -> Node:
+    """飾りの要素を落とす。ただし本文ごと消してしまう form は残す。
+
+    自治体サイトに多い ASP.NET 系の CMS は、ページ全体を 1 つの `<form>` で囲む。
+    検索窓のつもりで form を捨てると本文が丸ごと消え、物件一覧が 0 件になる。
+    """
+    root_len = len(root.text(separator=" ", strip=True))
     for tag in NOISE_TAGS:
         for n in root.css(tag):
+            if (
+                tag == "form"
+                and root_len
+                and len(n.text(separator=" ", strip=True)) >= root_len * 0.5
+            ):
+                continue
             n.decompose()
     return root
 
