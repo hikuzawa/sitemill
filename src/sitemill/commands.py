@@ -12,6 +12,7 @@ from typing import Any
 
 from sitemill.build.site import SiteBuilder
 from sitemill.deploy import DeployPlan, deploy
+from sitemill.diff.schedule import IntervalPolicy, source_due
 from sitemill.diff.state import CrawlState
 from sitemill.extract.llm import LLMError, LLMProvider, make_provider
 from sitemill.extract.pipeline import extract_page, prepare_input
@@ -111,6 +112,26 @@ def cmd_crawl(
     crawlable = [s for s in sources if s.crawlable]
     for _ in range(len(sources) - len(crawlable)):
         report.bump("crawl", "skipped_link_only")
+    cfg = rt.ws.site.crawl
+    if cfg.adaptive_interval and not force:
+        # 動きの無いサイトは間隔を延ばす（下限は週 1 回）。相手サイトへの負荷を下げる
+        policy = IntervalPolicy(
+            fresh_days=cfg.fresh_days,
+            slow_after_days=cfg.slow_after_days,
+            mid_interval_days=cfg.mid_interval_days,
+            max_interval_days=cfg.max_interval_days,
+        )
+        now = utcnow()
+        due: list[Source] = []
+        for src in crawlable:
+            ok, interval, why = source_due(src.id, state, now=now, policy=policy)
+            if ok:
+                due.append(src)
+            else:
+                report.bump("crawl", "skipped_not_due")
+                log.debug("%s: 今回は取りに行かない（%s）", src.id, why)
+            del interval
+        crawlable = due
     with rt.client() as client:
 
         def one(src: Source) -> Any:

@@ -82,6 +82,13 @@ class CrawlConfig(BaseModel):
     user_agent: str | None = None
     # ホスト単位の並列数（ADR 0013）。1 ホストあたりの間隔は並列でも縮まらない
     max_workers: int = 4
+    # 変化の少ないサイトは巡回間隔を延ばす（相手サイトへの負荷を下げる）。
+    # 下限は max_interval_days（既定 7 日）で、必ず週 1 回は取りに行く
+    adaptive_interval: bool = True
+    fresh_days: int = 7  # この日数内に変化があれば毎日
+    slow_after_days: int = 28  # これ以上変化が無ければ最長間隔
+    mid_interval_days: int = 3  # その中間
+    max_interval_days: int = 7  # 最長（＝週 1 回）
 
 
 class LLMConfig(BaseModel):
