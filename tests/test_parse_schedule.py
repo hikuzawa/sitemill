@@ -319,3 +319,45 @@ def test_a_shrine_precinct_that_is_freely_open_is_read() -> None:
     assert periods is not None and periods[0].always_open
     periods, note = parse_opening_hours("拝観自由")
     assert note == "always_open"
+
+
+# --- 役所の窓口時間を施設の営業時間にしない（3 度取り違えた） -----------------
+
+
+def test_office_hours_are_never_facility_hours() -> None:
+    """「開庁時間 8:30〜17:15」は役所の窓口の時間で、施設の営業時間ではない。
+
+    3 度取り違えた: 県のフッター（S6-1、県立ミュージアムに 8:30〜17:15）、
+    市町のフッター（S6-3 ②、粟井神社に開庁時間）、そして電話受付の時間。
+    発見側の守りだけでは足りないので、**値を作る手前**で落とす。
+    """
+    for quote in (
+        "開庁時間 8:30〜17:15",
+        "窓口時間 9:00〜17:00",
+        "執務時間 8時30分から17時15分",
+        "電話受付 9:00~17:00",
+        "お問い合わせ受付 10:00〜16:00",
+        "9:00〜17:00、窓口の受付時間は8:30〜17:15",
+    ):
+        value, note = parse_opening_hours(quote)
+        if quote.startswith("9:00"):
+            # 施設の時間が先に書かれていれば、そちらは残す
+            assert value is not None and value[0].ranges[0].start == time(9, 0), quote
+            continue
+        assert value is None, quote
+        assert note == "office_hours", (quote, note)
+
+
+def test_a_phone_note_in_brackets_does_not_drop_the_facility_hours() -> None:
+    """「9:00〜17:00（電話でのお問い合わせは9:00〜16:00）」の本体は施設の時間である。"""
+    value, note = parse_opening_hours("9:00〜17:00（電話でのお問い合わせは9:00〜16:00）")
+    assert note is None
+    assert value is not None and len(value) == 1
+    assert (value[0].ranges[0].start, value[0].ranges[0].end) == (time(9, 0), time(17, 0))
+
+
+def test_a_reception_note_still_becomes_the_last_entry() -> None:
+    """「入館は16:30まで」は締切として残す（窓口時間の規則で消さない）。"""
+    value, _ = parse_opening_hours("10:00〜17:00（入館は16:30まで）")
+    assert value is not None
+    assert value[0].ranges[0].last_entry == time(16, 30)

@@ -42,6 +42,14 @@ _SEASON = re.compile(
 _SLASH_SPAN = re.compile(
     rf"(?<![\d:])(\d{{1,2}})\s*/\s*(\d{{1,2}})\s*{DASH}\s*(\d{{1,2}})\s*/\s*(\d{{1,2}})(?![\d:])"
 )
+# 役所の窓口・事務所・電話受付の時間。**施設の営業時間ではない**。
+# 自治体サイトのフッターにはほぼ必ず「開庁時間 8:30〜17:15」があり、市町の観光ページにも
+# 「開庁時間」が入る。3 度取り違えたので、値を作る手前で落とす（ADR 0018 追記）
+_OFFICE_HOURS = re.compile(
+    r"開庁時間|閉庁|執務時間|窓口(?:の)?(?:受付)?時間|事務(?:所|局)(?:の)?(?:受付)?時間|"
+    r"電話(?:での)?(?:お問い?合わせ|受付|対応)|お問い?合わせ(?:の)?(?:受付|時間)|"
+    r"予約(?:の)?(?:電話)?受付時間"
+)
 # 原文が「時間の指定が無い」と明示している書き方。値として持つ（unknown にしない）
 # 寺社は「参拝自由」と書く。これが読めないと、境内が時間の記載なし扱いになる
 _ALWAYS_OPEN = re.compile(
@@ -131,6 +139,18 @@ def _season(text: str) -> tuple[AnnualSpan | None, str]:
     return span, text[: m.start()] + " " + text[m.end() :]
 
 
+_PAREN = re.compile(r"[（(][^）)]*[）)]")
+
+
+def _drop_office_notes(text: str) -> str:
+    """括弧の中の「電話でのお問い合わせは…」のような注記を落とす。
+
+    落とさないと、施設の時間まで一緒に捨ててしまう
+    （「9:00〜17:00（電話でのお問い合わせは9:00〜16:00）」）。
+    """
+    return _PAREN.sub(lambda m: "" if _OFFICE_HOURS.search(m.group(0)) else m.group(0), text)
+
+
 def _before_first_clock(text: str) -> str:
     """最初の時刻より前の部分。曜日の指定はここにしか書かれない。
 
@@ -150,7 +170,7 @@ def parse_opening_hours(quote: str) -> tuple[list[HoursPeriod] | None, str | Non
     """
     if not quote or not quote.strip():
         return None, "no_text"
-    text = _slash_spans(normalize_text(quote))
+    text = _drop_office_notes(_slash_spans(normalize_text(quote)))
     if _ALWAYS_OPEN.search(text):
         # 「入園自由」「24時間」。時間帯は無いが**開いていることは分かる**ので値にする。
         # 時間が書かれていないだけの施設（unknown）と区別する
@@ -161,9 +181,14 @@ def parse_opening_hours(quote: str) -> tuple[list[HoursPeriod] | None, str | Non
     # 見出しだけの断片は「ここから先はこの季節」として覚えておく
     #   03/21~10/20 / 8:30~17:00 / 8:36 / 17:00 / 10/21~11/30 / 8:00~17:00 …
     pending_season: AnnualSpan | None = None
+    office_only = False
     for segment in _SEGMENT_SPLIT.split(text):
         segment = segment.strip()
         if not segment:
+            continue
+        if _OFFICE_HOURS.search(segment):
+            # 役所の窓口・電話受付の時間。施設の営業時間として値にしない
+            office_only = True
             continue
         season, rest = _season(segment)
         ranges = parse_time_ranges(rest)
@@ -176,5 +201,5 @@ def parse_opening_hours(quote: str) -> tuple[list[HoursPeriod] | None, str | Non
         days = parse_day_selector(_before_first_clock(rest)) or DaySelector()
         periods.append(HoursPeriod(ranges=ranges, days=days, season=season, label=segment or None))
     if not periods:
-        return None, "no_time_range"
+        return None, "office_hours" if office_only else "no_time_range"
     return periods, None
