@@ -41,12 +41,18 @@ def test_hosts_run_in_parallel_but_each_host_keeps_its_delay() -> None:
 
     assert all(r.ok for r in results)
     assert client.request_count == 10  # 8 ページ + robots.txt 2 回（カウンタもスレッド安全）
+    windows = {}
     for h in ("a", "b"):
         ts = sorted(hits[h])
         gaps = [b - a for a, b in zip(ts, ts[1:], strict=False)]
         assert all(g >= DELAY * 0.9 for g in gaps), (h, gaps)  # 同一ホストは間隔を守る
-    # 2 ホストを直列に回すと約 7×DELAY。並行なら約 4×DELAY で終わる
-    assert elapsed < 7 * DELAY * 0.85, elapsed
+        windows[h] = (ts[0], ts[-1])
+    # 並行しているかは「2 ホストの取得期間が重なっているか」で見る。経過時間の上限で見ると、
+    # 機械が混んでいるときに落ちる（実際に 1 回落ちた）。重なりは負荷に左右されない
+    (a0, a1), (b0, b1) = windows["a"], windows["b"]
+    assert min(a1, b1) > max(a0, b0), windows
+    # 直列なら 7×DELAY 以上かかる。念のための緩い上限
+    assert elapsed < 7 * DELAY, elapsed
 
 
 @respx.mock
