@@ -13,6 +13,7 @@
 - **図解・埋め込み（`charts/`, `embeds/`）**: 依存なしの SVG グラフと、Google Maps などの埋め込み（転載ではなく埋め込み機能経由のみ）。
 - **ライセンス判定（`license/`）**: ホワイトリスト（CC BY / CC0 / 政府標準利用規約 2.0 など）に一致した明示的な証拠がある場合だけ採用。既定は不採用。
 - **計測（`metrics/`）**: 実行レポートと、fixture による抽出精度の計測（項目別の抽出率・null 理由）。
+- **案件選定（`affiliate/`）**: ASP の検索結果を貼ると、案件を構造化して導線適合・地域・成果条件の重さ・確定率・EPC・掲載の是非で判定し、申請すべき順に並べる。除外は理由つきで残す。物差しはサービスごとの YAML（`profiles/` に雛形）。
 - **秘密検出（`scan-secrets`）**: コミット前フックと CI で、鍵・トークン・`.env` の混入を止める。
 
 設計判断は [`docs/adr/`](docs/adr/) に ADR として残している。
@@ -25,6 +26,8 @@ uv run pytest
 # サービス側のルート（site.toml のある場所）で:
 uv run sitemill run          # crawl → extract → build
 uv run sitemill eval         # 保存済み fixture で抽出精度を計測
+# どこでも実行できる:
+uv run sitemill offers screen --profile profile.yaml --input paste.txt   # ASP 案件の選定
 ```
 
 コミット前フックの有効化（clone 後に一度）:

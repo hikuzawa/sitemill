@@ -47,3 +47,18 @@ def parse_int(s: str) -> int | None:
 
 def has_digit(s: str) -> bool:
     return any(ch.isdigit() for ch in normalize_text(s))
+
+
+def parse_percent(s: str) -> float | None:
+    """「82.5%」「確定率 8 割」を百分率の数にする。数値が無ければ None。"""
+    t = normalize_text(s)
+    if "割" in t and "%" not in t:
+        nums = find_numbers(t)
+        return float(nums[0] * 10) if nums else None
+    if "%" not in t and "パーセント" not in t:
+        return None
+    m = re.search(r"(\d[\d,]*(?:\.\d+)?)\s*(?:%|パーセント)", t)
+    if not m:
+        return None
+    d = to_decimal(m.group(1))
+    return float(d) if d is not None else None

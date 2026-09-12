@@ -10,11 +10,14 @@
   `embeds/` 地図・SNS 埋め込み、`i18n/` 多言語（ロケール・文言カタログ・ロケール別書式）、
   `clock.py` 日本時間、`jpcal/` 祝日、`openstatus/` 「その日開いているか」の判定、
   `deploy/` デプロイ、`metrics/` 実行レポートと抽出精度、`store/` JSON/JSONL の永続化
+- `affiliate/` ASP 案件の選定（貼り付け→構造化→判定→申請順、ADR 0019）。物差しは `profiles/` の雛形を
+  サービス側にコピーして渡す
 - `docs/adr/` 設計判断。方針を変えるときは新しい ADR を足す（既存は上書きしない）
 
 ## コマンド
 - `uv sync` 依存を入れる / `uv run pytest` / `uv run ruff check src tests` / `uv run ruff format src tests`
 - CLI はサービス側のルート（site.toml のある場所）で `uv run sitemill <discover|crawl|extract|build|deploy|run|eval|status>` を実行する
+- `uv run sitemill offers screen|emit` は案件の選定。site.toml を必要としないのでどこでも実行できる（ADR 0019）
 - `uv run sitemill eval --record` は本番の LLM で fixture の応答を取り直してから計測する（旧応答は llm_response.previous.json に残る）
 
 ## 守ること

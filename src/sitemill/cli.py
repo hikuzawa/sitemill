@@ -244,5 +244,156 @@ def scan_secrets(
     typer.echo("scan-secrets: 問題なし")
 
 
+offers_app = typer.Typer(
+    help="ASP の案件を選ぶ（貼り付け → 構造化 → 判定 → 申請順、ADR 0019）",
+    no_args_is_help=True,
+)
+app.add_typer(offers_app, name="offers")
+
+ProfileOpt = Annotated[Path, typer.Option("--profile", "-p", help="判定プロファイル（YAML）")]
+
+
+def _profile(path: Path):
+    from sitemill.affiliate import ProfileError, load_profile
+
+    try:
+        return load_profile(path)
+    except ProfileError as e:
+        typer.echo(f"エラー: {e}", err=True)
+        raise typer.Exit(code=2) from e
+
+
+def _paste(path: Path | None) -> str:
+    """貼り付けたテキストを読む。--input が無ければ標準入力から読む。"""
+    if path is not None:
+        if not path.is_file():
+            typer.echo(f"エラー: 入力ファイルが無い: {path}", err=True)
+            raise typer.Exit(code=2)
+        return path.read_text(encoding="utf-8")
+    import sys
+
+    text = sys.stdin.read()
+    if not text.strip():
+        typer.echo("エラー: 入力が空。--input でファイルを渡すか、標準入力に貼る", err=True)
+        raise typer.Exit(code=2)
+    return text
+
+
+@offers_app.command("screen")
+def offers_screen(
+    profile_path: ProfileOpt = Path("data/affiliates/profile.yaml"),
+    input_path: Annotated[
+        Path | None,
+        typer.Option("--input", "-i", help="ASP の検索結果を貼ったテキスト（省略時は標準入力）"),
+    ] = None,
+    asp: Annotated[
+        str, typer.Option("--asp", help="ASP 名。テキストに書かれていないときに補う")
+    ] = "",
+    out: Annotated[
+        Path | None, typer.Option("--out", "-o", help="Markdown の書き出し先（省略時は画面）")
+    ] = None,
+    json_out: Annotated[
+        Path | None, typer.Option("--json", help="構造化データの書き出し先（offers emit で使う）")
+    ] = None,
+) -> None:
+    """貼り付けた検索結果を構造化して判定し、申請すべき順の表と除外理由を出す。"""
+    import json as _json
+
+    from sitemill.affiliate import markdown_report, parse_offers, screen
+
+    prof = _profile(profile_path)
+    candidates = parse_offers(_paste(input_path), asp=asp)
+    if not candidates:
+        typer.echo("案件を 1 件も取り出せなかった。案件と案件の間に空行を入れて貼り直す", err=True)
+        raise typer.Exit(code=1)
+    result = screen(candidates, prof)
+    report = markdown_report(result)
+    if out is not None:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(report + "\n", encoding="utf-8")
+        typer.echo(f"表を書き出した: {out}")
+    else:
+        typer.echo(report)
+    if json_out is not None:
+        json_out.parent.mkdir(parents=True, exist_ok=True)
+        json_out.write_text(
+            _json.dumps(result.to_dict(), ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
+        typer.echo(f"構造化データを書き出した: {json_out}")
+    typer.echo(
+        f"申請 {len(result.applying)} / 保留 {len(result.holding)} / 除外 {len(result.rejected)}",
+        err=True,
+    )
+
+
+@offers_app.command("emit")
+def offers_emit(
+    pick: Annotated[str, typer.Argument(help="案件名の一部、または申請表の番号")],
+    json_path: Annotated[
+        Path, typer.Option("--json", help="offers screen --json で書き出したファイル")
+    ] = Path("data/affiliates/screened.json"),
+    profile_path: ProfileOpt = Path("data/affiliates/profile.yaml"),
+    offer_id: Annotated[
+        str, typer.Option("--offer-id", help="/go/<id> に使う英小文字・数字・ハイフン")
+    ] = "",
+    fmt: Annotated[
+        str, typer.Option("--format", "-f", help="yaml（受け渡し様式）/ code（登録用）/ both")
+    ] = "both",
+) -> None:
+    """承認された案件を、選定に使ったのと同じデータから掲載側の様式に変換する。"""
+    import json as _json
+
+    from sitemill.affiliate import EmitError, Screened, ScreenResult, render_code, render_handoff
+
+    prof = _profile(profile_path)
+    if not json_path.is_file():
+        typer.echo(f"エラー: {json_path} が無い。先に offers screen --json を実行する", err=True)
+        raise typer.Exit(code=2)
+    data = _json.loads(json_path.read_text(encoding="utf-8"))
+    result = ScreenResult(
+        profile_name=data.get("profile", ""),
+        items=tuple(Screened.from_dict(d) for d in data.get("items", [])),
+    )
+    picked = _pick(result, pick)
+    try:
+        if fmt in ("yaml", "both"):
+            typer.echo(render_handoff(picked, prof, offer_id=offer_id).rstrip())
+        if fmt == "both":
+            typer.echo("")
+        if fmt in ("code", "both"):
+            typer.echo(render_code(picked, prof, offer_id=offer_id).rstrip())
+    except EmitError as e:
+        typer.echo(f"エラー: {e}", err=True)
+        raise typer.Exit(code=2) from e
+    if not (offer_id or picked.candidate.name):
+        return
+    if not offer_id:
+        typer.echo(
+            "offer_id は案件名の英数字から作った候補。ふさわしくなければ --offer-id で指定する",
+            err=True,
+        )
+
+
+def _pick(result, pick: str):
+    """番号（申請表の行）または案件名の一部で 1 件選ぶ。"""
+    if pick.isdigit():
+        rows = result.applying
+        index = int(pick)
+        if not 1 <= index <= len(rows):
+            typer.echo(f"エラー: 申請表に {index} 行目は無い（{len(rows)} 件）", err=True)
+            raise typer.Exit(code=2)
+        return rows[index - 1]
+    hits = [s for s in result.items if pick in s.candidate.name]
+    if not hits:
+        typer.echo(f"エラー: 「{pick}」に当たる案件が無い", err=True)
+        raise typer.Exit(code=2)
+    if len(hits) > 1:
+        typer.echo(f"エラー: 「{pick}」に当たる案件が {len(hits)} 件ある:", err=True)
+        for s in hits:
+            typer.echo(f"  - {s.candidate.name}", err=True)
+        raise typer.Exit(code=2)
+    return hits[0]
+
+
 if __name__ == "__main__":  # pragma: no cover
     app()
