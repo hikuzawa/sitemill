@@ -310,3 +310,12 @@ def test_a_month_range_is_not_read_as_weekdays() -> None:
     assert periods[0].season is not None
     assert (periods[0].season.start_month, periods[0].season.end_month) == (3, 9)
     assert periods[0].days.every_day
+
+
+def test_a_shrine_precinct_that_is_freely_open_is_read() -> None:
+    """寺社は「参拝自由」と書く。読めないと境内が「時間の記載なし」になる。"""
+    periods, note = parse_opening_hours("参拝自由(お納経7:00~17:00)")
+    assert note == "always_open"
+    assert periods is not None and periods[0].always_open
+    periods, note = parse_opening_hours("拝観自由")
+    assert note == "always_open"

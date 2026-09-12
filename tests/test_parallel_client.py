@@ -51,8 +51,9 @@ def test_hosts_run_in_parallel_but_each_host_keeps_its_delay() -> None:
     # 機械が混んでいるときに落ちる（実際に 1 回落ちた）。重なりは負荷に左右されない
     (a0, a1), (b0, b1) = windows["a"], windows["b"]
     assert min(a1, b1) > max(a0, b0), windows
-    # 直列なら 7×DELAY 以上かかる。念のための緩い上限
-    assert elapsed < 7 * DELAY, elapsed
+    # 経過時間の上限は置かない。重なりが並行の証拠で、合計時間は機械の混み具合で動くだけ
+    # （2 回落ちた。1 回目で緩めたが、負荷が高いと同じように落ちる）
+    assert elapsed > 0
 
 
 @respx.mock
