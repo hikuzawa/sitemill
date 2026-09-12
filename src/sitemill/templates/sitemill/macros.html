@@ -28,16 +28,55 @@
 </section>
 {% endmacro %}
 
-{% macro head_meta(meta, site, base_url, analytics="", site_verification=none) %}
+{# locale / hreflangs はビルダーが描画変数として渡す（多言語サイトのみ。ADR 0016）。
+   単一言語のサービスは渡さなくてよく、その場合は site.language から og:locale を決める #}
+{# 多言語版の信頼ブロック。ロケールを明示して渡す（マクロの中からは描画中の context が見えないため）。
+   必要な文言カタログのキー（i18n/<locale>.yaml）:
+     trust.title / trust.updated / trust.timezone / trust.count / trust.count_value（{count}）
+     trust.sources / trust.sources_default / trust.fetched（{when}）/ trust.operator / trust.contact / trust.details #}
+{% macro trust_block_l(trust, locale) %}
+<section class="trust" data-sitemill-trust aria-label="{{ t_in(locale, 'trust.title') }}">
+  <h2 class="trust-title">{{ t_in(locale, 'trust.title') }}</h2>
+  <dl class="trust-list">
+    <dt>{{ t_in(locale, 'trust.updated') }}</dt>
+    <dd><time datetime="{{ trust.updated_at.isoformat() }}">{{ fmt_datetime(trust.updated_at, locale) }}</time> {{ t_in(locale, 'trust.timezone') }}</dd>
+    {% if trust.record_count is not none %}
+    <dt>{{ t_in(locale, 'trust.count') }}</dt>
+    <dd>{{ t_in(locale, 'trust.count_value', count=fmt_number(trust.record_count, locale)) }}</dd>
+    {% endif %}
+    <dt>{{ t_in(locale, 'trust.sources') }}</dt>
+    <dd>
+      {% if trust.sources %}
+      <ul class="trust-sources">
+        {% for s in trust.sources %}
+        <li><a href="{{ s.url }}" rel="noopener" target="_blank">{{ s.label }}</a>{% if s.fetched_at %} {{ t_in(locale, 'trust.fetched', when=fmt_datetime(s.fetched_at, locale)) }}{% endif %}</li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      {{ t_in(locale, 'trust.sources_default') }}
+      {% endif %}
+    </dd>
+    <dt>{{ t_in(locale, 'trust.operator') }}</dt>
+    <dd>{{ trust.operator.name }}{% if trust.operator.url %} (<a href="{{ trust.operator.url }}">{{ t_in(locale, 'trust.details') }}</a>){% endif %}</dd>
+    <dt>{{ t_in(locale, 'trust.contact') }}</dt>
+    <dd>{{ trust.operator.contact }}</dd>
+  </dl>
+</section>
+{% endmacro %}
+
+{% macro head_meta(meta, site, base_url, analytics="", site_verification=none, locale=none, hreflangs=none) %}
 <link rel="canonical" href="{{ base_url }}{{ meta.url_path }}">
 {% if meta.noindex %}<meta name="robots" content="noindex">{% endif %}
 {% if site_verification %}<meta name="google-site-verification" content="{{ site_verification }}">{% endif %}
+{% for link in hreflangs or [] %}
+<link rel="alternate" hreflang="{{ link.hreflang }}" href="{{ link.href }}">
+{% endfor %}
 <meta property="og:type" content="{{ meta.og_type }}">
 <meta property="og:title" content="{{ meta.title }}">
 <meta property="og:description" content="{{ meta.description }}">
 <meta property="og:url" content="{{ base_url }}{{ meta.url_path }}">
 <meta property="og:site_name" content="{{ site.name }}">
-<meta property="og:locale" content="ja_JP">
+<meta property="og:locale" content="{{ locale.og if locale else site.language|og_locale }}">
 <meta name="twitter:card" content="summary">
 {% for node in meta.structured_data %}
 <script type="application/ld+json">{{ node|tojson }}</script>

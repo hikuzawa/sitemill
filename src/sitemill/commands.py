@@ -23,7 +23,7 @@ from sitemill.metrics.evalcases import EvalResult, load_eval_cases, record_respo
 from sitemill.metrics.extraction import ExtractionMetrics
 from sitemill.metrics.reports import new_report, save_report
 from sitemill.models import ExtractorInfo, Provenance, RunReport, Source, utcnow
-from sitemill.service import Service, load_service
+from sitemill.service import Service, check_crawl_gate, load_service
 from sitemill.settings import Workspace
 from sitemill.store.jsonio import read_jsonl, write_json
 from sitemill.store.raw import RawCache
@@ -57,6 +57,8 @@ class Runtime:
 
     def sources(self, ids: list[str] | None = None) -> list[Source]:
         sources = self.service.sources(self.ws)
+        # 巡回してよい運営主体かをここで必ず通す（ADR 0017）。ids で絞る前に全件を見る
+        check_crawl_gate(self.service, sources)
         if ids:
             wanted = set(ids)
             missing = wanted - {s.id for s in sources}
@@ -422,7 +424,7 @@ def cmd_deploy(rt: Runtime, *, dry_run: bool = True, project: str | None = None)
 
 def cmd_status(rt: Runtime) -> dict[str, Any]:
     state = CrawlState.load(rt.state_path)
-    sources = rt.service.sources(rt.ws)
+    sources = rt.sources()
     records = {}
     for src in sources:
         path = rt.ws.records_dir / f"{src.id}.jsonl"

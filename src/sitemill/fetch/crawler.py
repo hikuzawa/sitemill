@@ -12,7 +12,7 @@ from sitemill.diff.normalize import normalize_for_hash
 from sitemill.diff.state import CrawlState
 from sitemill.fetch.client import PoliteClient
 from sitemill.fetch.links import extract_links, host_allowed, host_of
-from sitemill.models import FollowRule, PageKind, Source
+from sitemill.models import FollowRule, Source
 from sitemill.store.raw import RawCache
 
 log = logging.getLogger(__name__)
@@ -21,7 +21,7 @@ log = logging.getLogger(__name__)
 @dataclass
 class CrawledPage:
     url: str
-    kind: PageKind
+    kind: str
     status: int
     changed: bool = False
     not_modified: bool = False
@@ -73,7 +73,7 @@ def crawl_source(
 
     limit = min(max_pages or source.max_pages, source.max_pages)
     hosts = _allowed_hosts(source)
-    queue: deque[tuple[str, PageKind, list[FollowRule]]] = deque(
+    queue: deque[tuple[str, str, list[FollowRule]]] = deque(
         (p.url, p.kind, list(p.follow)) for p in source.pages
     )
     seen: set[str] = set()
@@ -87,7 +87,7 @@ def crawl_source(
             log.info("許可ホスト外のため取得しない: %s", url)
             continue
 
-        st = state.get_or_create(url, source.id, kind.value)
+        st = state.get_or_create(url, source.id, str(kind))
         cached = raw.load(source.id, url)
         use_conditional = cached is not None and not force
         result = client.get(
@@ -131,7 +131,7 @@ def crawl_source(
                     "final_url": result.final_url,
                     "content_type": result.headers.get("content-type"),
                     "content_hash": digest,
-                    "kind": kind.value,
+                    "kind": str(kind),
                 },
             )
         else:

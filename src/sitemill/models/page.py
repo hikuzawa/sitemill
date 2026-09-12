@@ -39,6 +39,11 @@ class PageMeta(BaseModel):
     priority: float = 0.5
     og_type: str = "website"  # OGP の og:type
     structured_data: list[dict[str, Any]] = Field(default_factory=list)  # JSON-LD ノード
+    # 多言語（ADR 0016）。単一言語のサービスは触らなくてよい
+    locale: str | None = None  # None なら site.language（既定ロケール）
+    # 同じ内容の各言語版。{ロケールコード: url_path}。自分自身も含める。
+    # ビルド時に「相手も同じ対応を持っているか」を検査し、hreflang として出力する
+    alternates: dict[str, str] = Field(default_factory=dict)
 
     @property
     def url_path(self) -> str:

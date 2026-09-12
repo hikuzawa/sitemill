@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from datetime import date
 from enum import StrEnum
+from typing import Annotated
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import AfterValidator, BaseModel, Field, model_validator
 
 from sitemill.models.license import LicenseVerdict
 
@@ -16,34 +17,80 @@ class CrawlPolicy(StrEnum):
 
 
 class OperatorKind(StrEnum):
-    municipality = "municipality"
-    municipality_affiliated = "municipality_affiliated"
-    third_party = "third_party"
+    """運営主体の種別。巡回してよいかはここと根拠（operator_evidence）で決まる（ADR 0017）。"""
+
+    municipality = "municipality"  # 市区町村
+    municipality_affiliated = "municipality_affiliated"  # 市区町村の関連組織・指定管理者
+    prefecture = "prefecture"  # 都道府県
+    tourism_association = "tourism_association"  # 観光協会・観光連盟
+    facility_official = "facility_official"  # 施設自身の公式サイト（社寺・公益財団など）
+    transport_operator = "transport_operator"  # 鉄道・バス・旅客船の事業者
+    third_party = "third_party"  # 民間のまとめサイト・予約サイト
     unknown = "unknown"
 
 
-CRAWLABLE_OPERATORS = frozenset({OperatorKind.municipality, OperatorKind.municipality_affiliated})
+# 公式と根拠づけできる種別。これ以外（third_party / unknown）は policy=crawl にできない。
+OFFICIAL_OPERATORS = frozenset(
+    {
+        OperatorKind.municipality,
+        OperatorKind.municipality_affiliated,
+        OperatorKind.prefecture,
+        OperatorKind.tourism_association,
+        OperatorKind.facility_official,
+        OperatorKind.transport_operator,
+    }
+)
+
+# サービスが `crawlable_operator_kinds` を宣言しないときの既定（自治体だけ）。
+# akiya-atlas はこの既定のまま動く（ADR 0017）。
+DEFAULT_CRAWLABLE_OPERATORS = frozenset(
+    {OperatorKind.municipality, OperatorKind.municipality_affiliated}
+)
+# 旧名。既定ゲートと同じ意味で残す
+CRAWLABLE_OPERATORS = DEFAULT_CRAWLABLE_OPERATORS
 
 
 class PageKind(StrEnum):
+    """よく使うページ種別。`kind` は文字列なので、サービスは独自の種別を足してよい（ADR 0017）。"""
+
     listing_index = "listing_index"
     listing_detail = "listing_detail"
     subsidy = "subsidy"
     info = "info"
+    notice = "notice"  # お知らせ・運休告知。巡回間隔の例外に使う（ADR 0018）
     other = "other"
+
+
+class PageKindValue(str):
+    """ページ種別の値。中身は文字列だが、旧来の Enum と同じく `.value` でも読める。
+
+    種別を `str` に緩めたとき（ADR 0017）、既に `kind.value` と書いていた
+    利用者を壊さないための互換。
+    新しく書くコードは文字列としてそのまま扱う。
+    """
+
+    __slots__ = ()
+
+    @property
+    def value(self) -> str:
+        return str(self)
+
+
+# 種別は小文字の英数字と下線だけ。書き間違いを静かに通さないための制約。
+PageKindStr = Annotated[str, Field(pattern=r"^[a-z][a-z0-9_]*$"), AfterValidator(PageKindValue)]
 
 
 class FollowRule(BaseModel):
     """seed ページから辿るリンクの規則。pattern は絶対 URL に対する正規表現。"""
 
     pattern: str
-    kind: PageKind = PageKind.listing_detail
+    kind: PageKindStr = PageKindValue("listing_detail")
     max_links: int | None = None
 
 
 class SeedPage(BaseModel):
     url: str
-    kind: PageKind = PageKind.info
+    kind: PageKindStr = PageKindValue("info")
     follow: list[FollowRule] = Field(default_factory=list)
 
 
@@ -84,10 +131,11 @@ class Source(BaseModel):
     @model_validator(mode="after")
     def _crawl_requires_public_operator(self) -> Source:
         if self.policy is CrawlPolicy.crawl:
-            if self.operator_kind not in CRAWLABLE_OPERATORS:
+            if self.operator_kind not in OFFICIAL_OPERATORS:
                 raise ValueError(
-                    f"{self.id}: policy=crawl は自治体または自治体の移住推進組織が運営主体の"
-                    f" Source にしか設定できない（operator_kind={self.operator_kind}）"
+                    f"{self.id}: policy=crawl は運営主体が公式と根拠づけできる Source にしか"
+                    f"設定できない（operator_kind={self.operator_kind}）。"
+                    "どのサービスが巡回してよいかはサービス側の宣言でさらに絞る（ADR 0017）"
                 )
             if self.operator_evidence is None:
                 raise ValueError(f"{self.id}: policy=crawl には operator_evidence（根拠）が必要")

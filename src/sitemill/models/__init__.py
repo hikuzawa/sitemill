@@ -5,18 +5,24 @@ from sitemill.models.page import OperatorInfo, Page, PageMeta, Redirect, SourceL
 from sitemill.models.run import LLMUsage, RunReport
 from sitemill.models.source import (
     CRAWLABLE_OPERATORS,
+    DEFAULT_CRAWLABLE_OPERATORS,
+    OFFICIAL_OPERATORS,
     CrawlPolicy,
     ExternalLink,
     FollowRule,
     OperatorEvidence,
     OperatorKind,
     PageKind,
+    PageKindStr,
+    PageKindValue,
     SeedPage,
     Source,
 )
 
 __all__ = [
     "CRAWLABLE_OPERATORS",
+    "DEFAULT_CRAWLABLE_OPERATORS",
+    "OFFICIAL_OPERATORS",
     "LICENSE_LABELS",
     "WHITELIST",
     "CrawlPolicy",
@@ -35,6 +41,8 @@ __all__ = [
     "OperatorKind",
     "Page",
     "PageKind",
+    "PageKindStr",
+    "PageKindValue",
     "PageMeta",
     "Provenance",
     "Redirect",

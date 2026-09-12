@@ -6,10 +6,11 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from sitemill import __version__
+from sitemill.i18n.locale import LocaleConfig
 
 SITE_FILE = "site.toml"
 
@@ -72,6 +73,7 @@ class PathsConfig(BaseModel):
     static: str = "static"
     dist: str = "dist"
     fixtures: str = "tests/fixtures"
+    i18n: str = "i18n"  # 文言カタログ <locale>.yaml の置き場（無くてもよい）
 
 
 class CrawlConfig(BaseModel):
@@ -110,6 +112,8 @@ class SiteConfig(BaseModel):
     service: str
     language: str = "ja"
     description: str = ""
+    # 多言語のときだけ書く（ADR 0016）。空なら language の 1 ロケールとして扱う
+    locales: list[LocaleConfig] = Field(default_factory=list)
     operator: OperatorConfig = Field(default_factory=OperatorConfig)
     paths: PathsConfig = Field(default_factory=PathsConfig)
     crawl: CrawlConfig = Field(default_factory=CrawlConfig)
@@ -124,6 +128,50 @@ class SiteConfig(BaseModel):
             raise ValueError("base_url は http(s):// で始める")
         return v
 
+    @model_validator(mode="after")
+    def _check_locales(self) -> SiteConfig:
+        if not self.locales:
+            return self
+        codes = [lc.code for lc in self.locales]
+        if len(codes) != len(set(codes)):
+            raise ValueError("locales の code が重複している")
+        paths = [lc.path for lc in self.locales]
+        if len(paths) != len(set(paths)):
+            raise ValueError("locales の path が重複している")
+        if sum(1 for lc in self.locales if lc.default) > 1:
+            raise ValueError("既定ロケール（default = true）は 1 つだけにする")
+        if self.language not in codes:
+            raise ValueError(f"language（{self.language}）を locales のどれかに一致させる")
+        if self.default_locale.path:
+            raise ValueError(
+                f"既定ロケール（{self.default_locale.code}）の path は空にする"
+                "（ルートに置き、hreflang の x-default が指す先にする）"
+            )
+        return self
+
+    @property
+    def locale_list(self) -> list[LocaleConfig]:
+        """宣言されたロケール。単一言語のサービスでは language の 1 件として見せる。"""
+        return self.locales or [LocaleConfig(code=self.language, default=True)]
+
+    @property
+    def default_locale(self) -> LocaleConfig:
+        locales = self.locale_list
+        return next((lc for lc in locales if lc.default), locales[0])
+
+    @property
+    def multilingual(self) -> bool:
+        return len(self.locale_list) > 1
+
+    def locale(self, code: str | None) -> LocaleConfig:
+        """コードからロケールを引く。None なら既定ロケール。"""
+        if code is None:
+            return self.default_locale
+        for lc in self.locale_list:
+            if lc.code == code:
+                return lc
+        raise KeyError(f"site.toml の [[locales]] に無いロケール: {code}")
+
     @property
     def user_agent(self) -> str:
         default = f"sitemill/{__version__} ({self.id}; +{self.base_url}/about/)"
@@ -136,7 +184,7 @@ class SiteConfig(BaseModel):
     def load(cls, path: Path) -> SiteConfig:
         data = tomllib.loads(path.read_text(encoding="utf-8"))
         site = dict(data.get("site", {}))
-        for key in ("operator", "paths", "crawl", "llm", "analytics"):
+        for key in ("operator", "paths", "crawl", "llm", "analytics", "locales"):
             if key in data:
                 site[key] = data[key]
         return cls.model_validate(site)
@@ -195,6 +243,11 @@ class Workspace:
     @property
     def templates_dir(self) -> Path:
         return self.root / self.site.paths.templates
+
+    @property
+    def i18n_dir(self) -> Path:
+        """文言カタログの置き場。無くてもよい（単一言語のサービス）。"""
+        return self.root / self.site.paths.i18n
 
     @property
     def static_dir(self) -> Path:
