@@ -64,8 +64,13 @@ def crawl_source(
     *,
     max_pages: int | None = None,
     force: bool = False,
+    only_kinds: frozenset[str] | None = None,
 ) -> CrawlSummary:
-    """seed ページと follow 規則に従って巡回し、状態と生 HTML キャッシュを更新する。"""
+    """seed ページと follow 規則に従って巡回し、状態と生 HTML キャッシュを更新する。
+
+    `only_kinds` を渡すと、その種別の seed ページだけを起点にする。巡回間隔を延ばした source から
+    告知ページだけを毎日取りに行くときに使う（ADR 0018）。
+    """
     summary = CrawlSummary(source_id=source.id)
     if not source.crawlable:
         log.info("%s は policy=%s のため巡回しない", source.id, source.policy)
@@ -73,8 +78,12 @@ def crawl_source(
 
     limit = min(max_pages or source.max_pages, source.max_pages)
     hosts = _allowed_hosts(source)
+    seeds = [p for p in source.pages if only_kinds is None or str(p.kind) in only_kinds]
+    if only_kinds is not None and not seeds:
+        log.info("%s: 種別 %s の seed が無いので取得しない", source.id, sorted(only_kinds))
+        return summary
     queue: deque[tuple[str, str, list[FollowRule]]] = deque(
-        (p.url, p.kind, list(p.follow)) for p in source.pages
+        (p.url, p.kind, list(p.follow)) for p in seeds
     )
     seen: set[str] = set()
 

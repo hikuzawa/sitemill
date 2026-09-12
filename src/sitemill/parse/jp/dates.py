@@ -1,4 +1,8 @@
-"""和暦・西暦の年と日付のパーサ。「築40年」のような相対表現は推定せず unparsed にする。"""
+"""和暦・西暦の年と日付のパーサ。「築40年」のような相対表現は推定せず unparsed にする。
+
+期間（「9月15日〜9月20日」）は `parse_date_range`。年が書かれていなければ呼び出し側が渡した年を
+使い、終わりが始まりより前なら年をまたぐ期間として扱う（12月29日〜1月3日）。
+"""
 
 from __future__ import annotations
 
@@ -71,3 +75,66 @@ def _build(y: int, m: int, d: int) -> tuple[date | None, str | None]:
         return date(y, m, d), None
     except ValueError:
         return None, "invalid_date"
+
+
+_RANGE_DASH = r"(?:〜|~|-|‐|–|—|ー|から|to|より)"
+_MD = (
+    r"(?:(?P<{p}y>\d{{4}})\s*[年/.\-]\s*)?"
+    r"(?P<{p}m>\d{{1,2}})\s*[月/.\-]\s*(?P<{p}d>\d{{1,2}})\s*日?"
+)
+_MD_ONLY_DAY = r"(?P<ed2>\d{1,2})\s*日"
+_DATE_RANGE = re.compile(
+    _MD.format(p="s")
+    + rf"\s*(?:\([^)]*\))?\s*{_RANGE_DASH}\s*"
+    + r"(?:"
+    + _MD.format(p="e")
+    + r"|"
+    + _MD_ONLY_DAY
+    + r")"
+)
+_SINGLE = re.compile(_MD.format(p="s") + r"\s*(?:\([^)]*\))?")
+
+
+def _build_date(y: int, m: int, d: int) -> date | None:
+    try:
+        return date(y, m, d)
+    except ValueError:
+        return None
+
+
+def parse_date_range(text: str, *, year: int) -> tuple[tuple[date, date] | None, str | None]:
+    """期間（開始日, 終了日）を返す。単独の日付はその 1 日だけの期間になる。
+
+    `year` は年が書かれていないときに使う基準年。JST の「今年」を呼び出し側が渡す
+    （実行環境が UTC だと年末年始に 1 年ずれるため、ここで暗黙に決めない）。
+    """
+    t = normalize_text(text)
+    if not t:
+        return None, "no_text"
+    m = _DATE_RANGE.search(t)
+    if m is not None:
+        g = m.groupdict()
+        sy = int(g["sy"] or year)
+        start = _build_date(sy, int(g["sm"]), int(g["sd"]))
+        if g.get("em"):
+            ey = int(g["ey"] or sy)
+            end = _build_date(ey, int(g["em"]), int(g["ed"]))
+        else:
+            # 「9月15日〜20日」。月は開始と同じ
+            end = _build_date(sy, int(g["sm"]), int(g["ed2"]))
+        if start is None or end is None:
+            return None, "invalid_date"
+        if end < start:
+            # 年をまたぐ（12月29日〜1月3日）。終わりを翌年にする
+            end = _build_date(end.year + 1, end.month, end.day)
+            if end is None:
+                return None, "invalid_date"
+        return (start, end), None
+    m = _SINGLE.search(t)
+    if m is not None:
+        g = m.groupdict()
+        one = _build_date(int(g["sy"] or year), int(g["sm"]), int(g["sd"]))
+        if one is None:
+            return None, "invalid_date"
+        return (one, one), "single_day"
+    return None, "no_date_range"

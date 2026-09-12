@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import shutil
 from dataclasses import dataclass, field
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, time
 from typing import Any
 
 from jinja2 import (
@@ -23,6 +23,7 @@ from sitemill.build import preflight
 from sitemill.build.pii import PiiPolicy, allow_also, default_jp_gov_policy, scan_text
 from sitemill.build.trust import verify_page_html
 from sitemill.charts import Chart
+from sitemill.clock import JST, to_jst
 from sitemill.embeds import render_embed
 from sitemill.i18n import (
     Catalog,
@@ -44,8 +45,6 @@ from sitemill.settings import Workspace
 from sitemill.store.jsonio import dumps
 
 log = logging.getLogger(__name__)
-# OS の時刻帯 DB が無い環境（Windows）があるため固定オフセットで表す（JST に夏時間は無い）
-JST = timezone(timedelta(hours=9), "JST")
 
 
 class BuildError(RuntimeError):
@@ -136,7 +135,7 @@ def _code_of(locale: LocaleConfig | str | None) -> str | None:
 
 
 def _as_jst(value: datetime) -> datetime:
-    return value.astimezone(JST) if value.tzinfo else value
+    return to_jst(value)
 
 
 @pass_context

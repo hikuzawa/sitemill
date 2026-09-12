@@ -115,8 +115,13 @@ def cmd_crawl(
     for _ in range(len(sources) - len(crawlable)):
         report.bump("crawl", "skipped_link_only")
     cfg = rt.ws.site.crawl
+    daily_kinds = frozenset(cfg.always_daily_kinds)
+    # 取りに行く対象。(source, 種別で絞るか) の組。None なら source 全体
+    targets: list[tuple[Source, frozenset[str] | None]] = [(s, None) for s in crawlable]
     if cfg.adaptive_interval and not force:
-        # 動きの無いサイトは間隔を延ばす（下限は週 1 回）。相手サイトへの負荷を下げる
+        # 動きの無いサイトは間隔を延ばす（下限は週 1 回）。相手サイトへの負荷を下げる。
+        # ただし告知ページ（always_daily_kinds）は毎日取りに行く。臨時休業と運休は
+        # 「変化の少ないページに突然出る」ので、間隔を延ばすと最も重要な情報を取り逃がす
         policy = IntervalPolicy(
             fresh_days=cfg.fresh_days,
             slow_after_days=cfg.slow_after_days,
@@ -124,27 +129,34 @@ def cmd_crawl(
             max_interval_days=cfg.max_interval_days,
         )
         now = utcnow()
-        due: list[Source] = []
+        targets = []
         for src in crawlable:
             ok, interval, why = source_due(src.id, state, now=now, policy=policy)
-            if ok:
-                due.append(src)
-            else:
-                report.bump("crawl", "skipped_not_due")
-                log.debug("%s: 今回は取りに行かない（%s）", src.id, why)
             del interval
-        crawlable = due
+            if ok:
+                targets.append((src, None))
+                continue
+            if daily_kinds and any(str(p.kind) in daily_kinds for p in src.pages):
+                targets.append((src, daily_kinds))
+                report.bump("crawl", "daily_kinds_only")
+                log.debug("%s: 告知ページだけ取りに行く（%s）", src.id, why)
+                continue
+            report.bump("crawl", "skipped_not_due")
+            log.debug("%s: 今回は取りに行かない（%s）", src.id, why)
     with rt.client() as client:
 
-        def one(src: Source) -> Any:
-            return crawl_source(src, client, state, raw, max_pages=limit, force=force)
+        def one(target: tuple[Source, frozenset[str] | None]) -> Any:
+            src, only_kinds = target
+            return crawl_source(
+                src, client, state, raw, max_pages=limit, force=force, only_kinds=only_kinds
+            )
 
         try:
-            if workers > 1 and len(crawlable) > 1:
+            if workers > 1 and len(targets) > 1:
                 with ThreadPoolExecutor(max_workers=workers) as pool:
-                    summaries = list(pool.map(one, crawlable))
+                    summaries = list(pool.map(one, targets))
             else:
-                summaries = [one(src) for src in crawlable]
+                summaries = [one(target) for target in targets]
         finally:
             state.save(rt.state_path)
         for summary in summaries:

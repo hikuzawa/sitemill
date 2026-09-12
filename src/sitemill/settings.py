@@ -93,6 +93,12 @@ class CrawlConfig(BaseModel):
     slow_after_days: int = 28  # これ以上変化が無ければ最長間隔
     mid_interval_days: int = 3  # その中間
     max_interval_days: int = 7  # 最長（＝週 1 回）
+    # この種別のページは変化率に関わらず毎日取りに行く（ADR 0018）。
+    # 臨時休業・運休の告知は「変化の少ないページに突然出る」ので、間隔を延ばすと取り逃がす
+    always_daily_kinds: tuple[str, ...] = ()
+    # 一次情報の取得がこの日数できていなければ、判定を unknown に落とす（鮮度の下限）。
+    # None なら鮮度を見ない。値を使うのはサービス側（openstatus.resolve_day に渡す）
+    stale_after_days: int | None = None
 
 
 class LLMConfig(BaseModel):
