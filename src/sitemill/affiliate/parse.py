@@ -150,12 +150,17 @@ def _split_records(text: str) -> list[_Record]:
     cur = _Record()
     pending: list[str] = []  # 直近の、ラベルの無い行の連なり
 
-    def start_new() -> None:
-        """今の案件を閉じ、直前のラベル無し行の末尾を次の案件の見出しとして渡す。"""
+    def start_new(*, hand_over: bool = True) -> None:
+        """今の案件を閉じ、直前のラベル無し行の末尾を次の案件の見出しとして渡す。
+
+        最後の項目より後ろの行は、見出しに使う 2 行を除いてどちらの案件にも入れない。
+        一覧の画面部品（「広告サンプル」・ページ送り・次ページのヘッダ）と、
+        区切りの無い関連キーワードの塊が混ざっているため。
+        """
         nonlocal cur, pending
         if cur.seen:
             records.append(cur)
-        head = pending[-_HEAD_LINES:]
+        head = pending[-_HEAD_LINES:] if hand_over else []
         cur = _Record(head=head, lines=list(head))
         pending = []
 
@@ -167,7 +172,7 @@ def _split_records(text: str) -> list[_Record]:
         if not line or _NOISE.fullmatch(line):
             continue
         if _SEPARATOR.fullmatch(line):
-            start_new()
+            start_new(hand_over=False)  # 貼る人が入れた区切り。手前の行は前の案件のもの
             continue
         pairs, head, i = _read_line(lines, start)
         if head:
@@ -189,8 +194,7 @@ def _split_records(text: str) -> list[_Record]:
             if value:
                 cur.fields.setdefault(name, value)  # 同じ項目が二度出たら先に出た方
         cur.lines += [ln for ln in lines[start:i] if ln]
-    if cur.seen:
-        records.append(cur)
+    start_new(hand_over=False)  # 最後の案件を閉じる
     return records
 
 

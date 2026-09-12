@@ -266,6 +266,18 @@ def test_screen_parts_never_become_the_offer(vertical):
     assert all("プログラム検索条件" not in c.raw for c in vertical)  # 一覧の見出しも入れない
 
 
+def test_keyword_blob_does_not_reach_the_matching(vertical, vertical_result):
+    """区切りの無い関連キーワードは原文に入れない。語の境界に偽の一致が出るため。
+
+    A8 は関連キーワードを区切り無しで並べるので、「投資用不動産」+「投資用マンション」が
+    「不動産投資」（除外語）に当たる。実データでこれが起きて、査定の案件が投資勧誘として落ちた。
+    """
+    c = vertical[1]
+    assert "投資用" not in c.raw
+    s = next(x for x in vertical_result.items if x.candidate is c)
+    assert s.verdict is Verdict.hold  # 除外ではない
+
+
 def test_tiered_reward_keeps_the_quote_and_the_first_amount(vertical):
     """段組みの報酬（▽一般 / ▽ポイントサイト）でも金額を 1 つ決める。"""
     c = vertical[2]
