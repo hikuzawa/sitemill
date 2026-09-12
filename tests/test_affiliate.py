@@ -319,6 +319,11 @@ def test_low_epc_is_held_only_when_the_rate_is_also_known(vertical, profile):
     assert [r for r in blind.reasons if "EPC" in r and "下限" in r] == []
     assert "確定率が読めない" in blind.reasons[0]
 
+    # 下限のすぐ上は止めない。確定率 90% 台で EPC が 1 桁台という案件は実在する
+    ok = screen([replace(low, epc_yen=6.38, approval_rate=93.75)], profile).items[0]
+    assert ok.verdict is Verdict.apply
+    assert [r for r in ok.reasons if "EPC" in r and "下限" in r] == []
+
 
 def test_report_shows_the_condition_quote_when_no_tier_matched(vertical_result):
     """段に当てはまらなくても、読めた成果条件の原文を表から消さない。"""
