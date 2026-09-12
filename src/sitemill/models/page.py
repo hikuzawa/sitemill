@@ -17,6 +17,8 @@ class SourceLink(BaseModel):
 class OperatorInfo(BaseModel):
     name: str
     contact: str
+    # 連絡先が URL のときに信頼ブロックで見せる文字列。無ければ URL をそのまま出す
+    contact_label: str | None = None
     url: str | None = None
 
 

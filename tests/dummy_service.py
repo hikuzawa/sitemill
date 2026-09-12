@@ -116,7 +116,11 @@ class DummyService:
             sources=[
                 SourceLink(label="ダミー市 空き家バンク", url=self.base + "/", fetched_at=now)
             ],
-            operator=OperatorInfo(name=ws.site.operator.name, contact=ws.site.operator.contact),
+            operator=OperatorInfo(
+                name=ws.site.operator.name,
+                contact=ws.site.operator.contact,
+                contact_label=ws.site.operator.contact_label,
+            ),
             record_count=len(records),
         )
         jsonld = [{"@context": "https://schema.org", "@type": "WebSite", "name": ws.site.name}]

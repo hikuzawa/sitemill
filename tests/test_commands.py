@@ -91,6 +91,41 @@ def test_crawl_extract_build_end_to_end(rt: commands.Runtime) -> None:
     assert plan.ok and plan.files >= 6
 
 
+def _build_with_contact(tmp_path: Path, block: str) -> str:
+    make_workspace(tmp_path)
+    site = tmp_path / "site.toml"
+    site.write_text(
+        site.read_text(encoding="utf-8").replace('contact = "test@example.com"', block),
+        encoding="utf-8",
+    )
+    rt = commands.Runtime.open(tmp_path, service=DummyService())
+    SiteBuilder(rt.ws, rt.service).build()
+    return (rt.ws.dist_dir / "index.html").read_text(encoding="utf-8")
+
+
+def test_trust_block_links_a_contact_url(tmp_path: Path) -> None:
+    block = """
+contact = "https://forms.example/contact"
+contact_label = "お問い合わせフォーム"
+""".strip()
+    html = _build_with_contact(tmp_path, block)
+    assert (
+        '連絡先: <a href="https://forms.example/contact" rel="noopener" '
+        'target="_blank">お問い合わせフォーム</a>'
+    ) in html
+
+
+def test_trust_block_falls_back_to_the_url_when_no_label(tmp_path: Path) -> None:
+    html = _build_with_contact(tmp_path, 'contact = "https://forms.example/contact"')
+    assert ">https://forms.example/contact</a>" in html
+
+
+def test_trust_block_keeps_a_non_url_contact_as_text(rt: commands.Runtime) -> None:
+    SiteBuilder(rt.ws, rt.service).build()
+    html = (rt.ws.dist_dir / "index.html").read_text(encoding="utf-8")
+    assert "連絡先: test@example.com" in html and 'href="test@example.com"' not in html
+
+
 def test_build_fails_without_trust_block(rt: commands.Runtime) -> None:
     (rt.ws.templates_dir / "broken.html").write_text(
         '<!doctype html><html lang="ja"><head><title>x</title></head><body>no trust</body></html>',

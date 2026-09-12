@@ -64,6 +64,8 @@ class Secrets(BaseSettings):
 class OperatorConfig(BaseModel):
     name: str = "準備中"
     contact: str = "準備中"
+    # contact が http で始まるときに信頼ブロックで見せる文字列（例: お問い合わせフォーム）
+    contact_label: str | None = None
     url: str | None = None
 
 

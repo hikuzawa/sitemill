@@ -23,7 +23,7 @@
       {% endif %}
     </dd>
     <dt>運営者</dt>
-    <dd>{{ trust.operator.name }}{% if trust.operator.url %}（<a href="{{ trust.operator.url }}">詳細</a>）{% endif %} ／ 連絡先: {{ trust.operator.contact }}</dd>
+    <dd>{{ trust.operator.name }}{% if trust.operator.url %}（<a href="{{ trust.operator.url }}">詳細</a>）{% endif %} ／ 連絡先: {% if trust.operator.contact.startswith("http") %}<a href="{{ trust.operator.contact }}" rel="noopener" target="_blank">{{ trust.operator.contact_label or trust.operator.contact }}</a>{% else %}{{ trust.operator.contact }}{% endif %}</dd>
   </dl>
 </section>
 {% endmacro %}
