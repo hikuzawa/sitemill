@@ -81,6 +81,11 @@ class Earning:
     reward_full_yen: int = 10_000  # これ以上で満点
 
 
+# 地域が合わない案件を保留にするときの既定の理由（ADR 0021）。サービスごとの言い回しは
+# プロファイルの region.reason で上書きする
+DEFAULT_REGION_REASON = "サイトの対象地域と重ならないので今の枠には出せない"
+
+
 @dataclass(frozen=True)
 class Profile:
     name: str
@@ -88,7 +93,7 @@ class Profile:
     conditions: tuple[ConditionTier, ...] = ()
     exclusions: tuple[Exclusion, ...] = ()
     service_area: tuple[str, ...] = ()  # 成果が出る地域。空なら全国
-    region_reason: str = "サイトの対象地域で成果が発生しない"
+    region_reason: str = DEFAULT_REGION_REASON
     thresholds: Thresholds = field(default_factory=Thresholds)
     weights: Weights = field(default_factory=Weights)
     earning: Earning = field(default_factory=Earning)
@@ -164,7 +169,7 @@ def from_dict(data: dict[str, Any], *, name: str = "") -> Profile:
         conditions=conditions,
         exclusions=exclusions,
         service_area=_tuple(region.get("service_area"), where="region.service_area"),
-        region_reason=str(region.get("reason", "サイトの対象地域で成果が発生しない")),
+        region_reason=str(region.get("reason", DEFAULT_REGION_REASON)),
         thresholds=Thresholds(
             min_approval_rate=_opt_float(th.get("min_approval_rate")),
             min_epc_yen=_opt_int(th.get("min_epc_yen")),

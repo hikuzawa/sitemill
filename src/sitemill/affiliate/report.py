@@ -40,7 +40,7 @@ def markdown_report(result: ScreenResult) -> str:
     out += _table(result.applying) if result.applying else ["採用できる案件が無い。", ""]
 
     if result.holding:
-        out += ["## 保留（落とす理由は無いが、今すぐ申請する理由も無い）", ""]
+        out += ["## 保留（今は出さないが、候補として残す）", ""]
         out += _table(result.holding)
 
     out += ["## 除外", ""]

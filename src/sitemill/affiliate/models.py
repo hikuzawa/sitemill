@@ -82,6 +82,9 @@ class Screened:
     kind: str = ""  # 当てはまった導線（掲載側の種別）
     placements: tuple[str, ...] = ()
     condition_tier: str = ""  # 成果条件の重さの段
+    # 地域が合わないので保留にしたもの。対応エリアの原文は candidate.region_quotes に残る。
+    # 将来その地域のページにだけ出すときの絞り込みに使う（ADR 0021）
+    region_limited: bool = False
     breakdown: dict[str, float] = field(default_factory=dict)
     reasons: tuple[str, ...] = ()
 
@@ -97,6 +100,7 @@ class Screened:
             "kind": self.kind,
             "placements": list(self.placements),
             "condition_tier": self.condition_tier,
+            "region_limited": self.region_limited,
             "breakdown": {k: round(v, 1) for k, v in self.breakdown.items()},
             "reasons": list(self.reasons),
         }
@@ -110,6 +114,7 @@ class Screened:
             kind=data.get("kind", ""),
             placements=tuple(data.get("placements") or ()),
             condition_tier=data.get("condition_tier", ""),
+            region_limited=bool(data.get("region_limited", False)),
             breakdown=dict(data.get("breakdown") or {}),
             reasons=tuple(data.get("reasons") or ()),
         )

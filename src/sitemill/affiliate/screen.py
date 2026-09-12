@@ -5,8 +5,7 @@
 除外（1 つでも当たれば不採用。順に見て、最初に当たった理由をそのまま出す）
 1. 信頼性: プロファイルの `exclusions` に当たる（情報商材・投資セミナーなど）
 2. 導線: どの導線にも当てはまらない
-3. 地域: 成果の出る地域がサイトの対象地域と重ならない
-4. しきい値: 確定率・EPC・報酬が下限を割る
+3. しきい値: 確定率・EPC・報酬が下限を割る
 
 点（満点 100。内訳はプロファイルの `weights`）
 - 導線適合: 案件名に導線の語があれば満点、成果条件や広告主名だけなら減点
@@ -14,8 +13,10 @@
 - 確定率: 下限から 100% までを線形に割り当てる。記載が無ければ既定の比で置く
 - 稼ぎ: EPC があれば EPC、無ければ報酬額
 
-点が `thresholds.min_score` に届かないものは除外せず「保留」にする。
-落とす理由はないが、今すぐ申請する理由もない、という状態を表に残す。
+保留は 2 通り。どちらも除外せず、点と根拠をつけたまま表に残す。
+- 点が `thresholds.min_score` に届かない（落とす理由はないが、今すぐ申請する理由もない）
+- 成果の出る地域がサイトの対象地域と重ならない（ADR 0021）。
+  今の枠には出せないが、将来その地域のページにだけ出す候補として残す
 """
 
 from __future__ import annotations
@@ -79,12 +80,10 @@ def _screen_one(cand: Candidate, profile: Profile) -> Screened:
         return _reject(cand, f"サイトの導線（{kinds}）に当てはまらない")
     reasons.append(funnel_why)
 
-    # 3. 地域
+    # 地域が合わないものは落とさず、点をつけたうえで保留に回す（ADR 0021）
     region = _region_problem(cand, profile)
-    if region:
-        return _reject(cand, region, kind=funnel.kind)
 
-    # 4. しきい値
+    # 3. しきい値
     th = profile.thresholds
     if th.min_approval_rate is not None and cand.approval_rate is not None:
         if cand.approval_rate < th.min_approval_rate:
@@ -130,6 +129,9 @@ def _screen_one(cand: Candidate, profile: Profile) -> Screened:
     verdict = Verdict.apply if total >= th.min_score else Verdict.hold
     if verdict is Verdict.hold:
         reasons.append(f"合計 {total:.0f} 点が申請の目安 {th.min_score:g} 点に届かない")
+    if region:
+        verdict = Verdict.hold
+        reasons.append(region)
     return Screened(
         candidate=cand,
         verdict=verdict,
@@ -137,6 +139,7 @@ def _screen_one(cand: Candidate, profile: Profile) -> Screened:
         kind=funnel.kind,
         placements=funnel.placements,
         condition_tier=tier_id,
+        region_limited=bool(region),
         breakdown=breakdown,
         reasons=tuple(reasons),
     )
