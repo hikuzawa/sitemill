@@ -240,9 +240,24 @@ def cmd_extract(
     workers = max(1, workers or ws.site.crawl.max_workers)
     sources = [s for s in rt.sources(source_ids) if s.crawlable]
     budget = _Budget(limit)
+    # 情報源の pages が巡回対象のすべてか。宣言したサービスだけ、seed から外れた状態を捨てる。
+    # 発見でページを足すサービス（akiya-atlas は一覧から詳細ページを見つける）では捨ててはいけない
+    declared_pages_only = bool(getattr(rt.service, "declared_pages_only", False))
 
     def run_source(src: Source) -> list[dict[str, Any]]:
         out: list[dict[str, Any]] = []
+        seeded = {p.url for p in src.pages}
+        stale = (
+            [st.url for st in state.for_source(src.id) if st.url not in seeded]
+            if declared_pages_only
+            else []
+        )
+        if stale:
+            # seed から外した URL。状態が残っているかぎり抽出され続け、外した判断が効かない
+            # （別の施設のページを外しても、その施設の事実が入り続ける）
+            state.forget(stale)
+            out.append({"bump": ("extract", "unseeded_dropped", len(stale))})
+            log.info("%s: seed に無い %d 件の状態を捨てる", src.id, len(stale))
         for st in state.for_source(src.id):
             if st.error is not None or not (st.pending_extract or all_pages):
                 continue

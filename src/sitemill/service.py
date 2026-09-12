@@ -29,6 +29,9 @@ class Service(Protocol):
 
     任意の属性・フック（あれば使う）:
     - `crawlable_operator_kinds`: 巡回を許す運営主体の種別。宣言しなければ自治体だけ（ADR 0017）
+    - `declared_pages_only`: 情報源の `pages` が巡回対象のすべてなら True。
+      このとき、`pages` から外した URL の巡回状態は `extract` で捨てられる（外した判断が効く）。
+      発見で詳細ページを足すサービスでは宣言しない（既定 False）
     - `pii_policy(ws)`: 公開前の個人情報検査のポリシー
     - `heal(ws, *, client, source_ids)`: 成果 0 件の source を選び直す自己修復
     """

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
 
@@ -59,6 +60,13 @@ class CrawlState(BaseModel):
         return sorted(
             (s for s in self.urls.values() if s.source_id == source_id), key=lambda s: s.url
         )
+
+    def forget(self, urls: Iterable[str]) -> int:
+        """情報源から外した URL の状態を捨てる。残すと、seed に無いページを取り続ける。"""
+        gone = [u for u in urls if u in self.urls]
+        for url in gone:
+            del self.urls[url]
+        return len(gone)
 
     def pending(self, source_id: str | None = None) -> list[UrlState]:
         return [

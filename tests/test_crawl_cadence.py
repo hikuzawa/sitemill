@@ -169,3 +169,23 @@ def test_a_new_seed_is_fetched_even_when_the_source_is_not_due(site: None, tmp_p
         str(call.request.url) for call in respx.calls if "robots" not in str(call.request.url)
     }
     assert NOTICE_URL in fetched
+
+
+def test_extract_forgets_urls_that_are_no_longer_seeded(tmp_path: Path) -> None:
+    """seed から外した URL の状態は捨てる。残ると、外したページを取り込み続ける。
+
+    japan-open-today で、屋島に別の施設（温泉）の URL を seed していたのを直したのに、
+    状態が残っていたため温泉の事実が入り続けた。宣言したサービスだけこの掃除をする。
+    """
+    from sitemill.diff.state import CrawlState, UrlState
+
+    state = CrawlState(
+        urls={
+            "https://example.jp/a": UrlState(url="https://example.jp/a", source_id="s1"),
+            "https://example.jp/gone": UrlState(url="https://example.jp/gone", source_id="s1"),
+            "https://other.jp/x": UrlState(url="https://other.jp/x", source_id="s2"),
+        }
+    )
+    assert state.forget(["https://example.jp/gone", "https://example.jp/never"]) == 1
+    assert sorted(state.urls) == ["https://example.jp/a", "https://other.jp/x"]
+    del tmp_path
