@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from sitemill.affiliate.models import Screened
-from sitemill.affiliate.screen import ScreenResult
+from sitemill.affiliate.screen import UNKNOWN_TIER, ScreenResult
 
 _COLUMNS = (
     "#",
@@ -81,7 +81,7 @@ def _table(rows: list[Screened]) -> list[str]:
                     _cell(c.advertiser),
                     _cell(s.kind),
                     _cell(c.reward_label),
-                    _cell(s.condition_tier or c.condition or "不明"),
+                    _cell(_condition_cell(s)),
                     c.approval_label,
                     c.epc_label,
                     _cell(" / ".join(c.region_quotes) if c.region_quotes else "制限なし"),
@@ -94,6 +94,17 @@ def _table(rows: list[Screened]) -> list[str]:
         )
     out.append("")
     return out
+
+
+def _condition_cell(s: Screened) -> str:
+    """段が決まっていればその名前、決まらなければ成果条件の原文を出す。
+
+    段に当てはまらなくても原文は読めていることがある（A8 は成果報酬の欄に条件が同居する）。
+    そこで「不明」と出すと、読めた原文が表から消える。
+    """
+    if s.condition_tier and s.condition_tier != UNKNOWN_TIER:
+        return s.condition_tier
+    return s.candidate.condition or UNKNOWN_TIER
 
 
 def _cell(text: str) -> str:

@@ -308,6 +308,13 @@ def test_low_epc_is_held_only_when_the_rate_is_also_known(vertical, profile):
     assert "確定率が読めない" in blind.reasons[0]
 
 
+def test_report_shows_the_condition_quote_when_no_tier_matched(vertical_result):
+    """段に当てはまらなくても、読めた成果条件の原文を表から消さない。"""
+    md = markdown_report(vertical_result)
+    assert "| 新規査定申込 |" in md  # 段は決まらないが原文は読めている
+    assert "| 無料の見積・査定・資料請求 |" in md  # 段が決まればそちらを出す
+
+
 def test_epc_above_the_floor_still_applies(vertical_result):
     """EPC が下限を超えていれば、保留の理由にはしない。"""
     s = next(x for x in vertical_result.items if "サンプル解体ナビ" in x.candidate.name)

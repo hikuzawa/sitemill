@@ -31,6 +31,9 @@ from sitemill.affiliate.models import Candidate, Screened, Verdict, number
 from sitemill.affiliate.profile import Funnel, Profile
 from sitemill.parse.jp import normalize_text
 
+# 成果条件の段を決められなかったときの段の名前。表と点の両方で使う
+UNKNOWN_TIER = "不明"
+
 
 @dataclass(frozen=True)
 class ScreenResult:
@@ -221,7 +224,7 @@ def _condition_score(cand: Candidate, profile: Profile) -> tuple[str, float, str
         if hit:
             return tier.id, tier.score, f"成果条件は「{tier.id}」（「{hit}」）"
     fallback = profile.thresholds.unknown_condition_score
-    return "不明", fallback, "成果条件の重さを判定できなかった（既定の配点で置いた）"
+    return UNKNOWN_TIER, fallback, "成果条件の重さを判定できなかった（既定の配点で置いた）"
 
 
 def _approval_score(cand: Candidate, profile: Profile) -> tuple[float, str]:
