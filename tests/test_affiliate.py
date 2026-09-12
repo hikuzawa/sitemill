@@ -22,6 +22,7 @@ from sitemill.affiliate import (
     screen,
     suggest_offer_id,
 )
+from sitemill.affiliate.models import Screened
 from sitemill.affiliate.parse import region_quotes
 
 PASTE = Path(__file__).parent / "fixtures" / "affiliate" / "asp-search-owner.txt"
@@ -83,8 +84,8 @@ def test_ranking_and_verdicts(result):
     assert [s.verdict for s in result.items[:2]] == [Verdict.apply, Verdict.apply]
 
     rejected = {s.candidate.name: "。".join(s.reasons) for s in result.rejected}
-    assert len(rejected) == 4
-    assert "首都圏" in next(v for k, v in rejected.items() if "かたづけ本舗" in k)
+    assert len(rejected) == 3
+    assert not any("かたづけ本舗" in k for k in rejected)  # 地域限定は保留に回る（ADR 0021）
     assert "投資" in next(v for k, v in rejected.items() if "投資セミナー" in k)
     assert "確定率" in next(v for k, v in rejected.items() if "ぬりかえ広場" in k)
     assert "所有者向け" in next(v for k, v in rejected.items() if "ウォーターサーバー" in k)
@@ -114,13 +115,44 @@ def test_low_score_is_held_not_rejected(profile, candidates):
     strict = replace(profile, thresholds=replace(profile.thresholds, min_score=95.0))
     held = screen(candidates, strict)
     assert len(held.applying) == 0
-    assert len(held.holding) == 2
+    assert len(held.holding) == 3  # 点が届かない 2 件と、地域限定の 1 件
     assert all("届かない" in "".join(s.reasons) for s in held.holding)
+
+
+def test_region_limited_is_held_as_a_candidate(result):
+    """地域が合わない案件は除外せず保留にする（ADR 0021）。
+
+    将来その地域の市町村ページにだけ出す可能性があるので、点も対応エリアの原文も残す。
+    """
+    s = next(x for x in result.items if "かたづけ本舗" in x.candidate.name)
+    assert s.verdict is Verdict.hold
+    assert s.region_limited is True
+    assert s in result.holding and s not in result.rejected
+    assert s.candidate.region_quotes  # 対応エリアの原文が残っている
+    assert s.kind == "遺品整理" and s.score > 0  # 導線と点もつけたまま
+    assert "首都圏" in "。".join(s.reasons)
+
+
+def test_region_limited_survives_the_json_round_trip(result):
+    """保留の印と対応エリアが JSON をまたいで残る（後で地域別に絞り込むため）。"""
+    s = next(x for x in result.items if "かたづけ本舗" in x.candidate.name)
+    back = Screened.from_dict(s.to_dict())
+    assert back.region_limited is True
+    assert back.candidate.region_quotes == s.candidate.region_quotes
+
+
+def test_region_limited_still_loses_to_a_threshold(profile, candidates):
+    """地域限定でも、しきい値を割るものは今までどおり除外する。"""
+    strict = replace(profile, thresholds=replace(profile.thresholds, min_approval_rate=80.0))
+    out = screen(candidates, strict)
+    s = next(x for x in out.items if "かたづけ本舗" in x.candidate.name)
+    assert s.verdict is Verdict.reject and "確定率" in "。".join(s.reasons)
 
 
 def test_markdown_report_has_table_and_reasons(result):
     md = markdown_report(result)
     assert "## 申請する順" in md
+    assert "## 保留（今は出さないが、候補として残す）" in md
     assert "## 除外" in md
     assert "| 確定率 |" in md
     assert "首都圏" in md
