@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import sys
 from pathlib import Path
 
@@ -168,10 +169,14 @@ def test_load_service_and_sources_yaml(tmp_path: Path, monkeypatch: pytest.Monke
     (tmp_path / "svc_mod.py").write_text(
         "from tests.dummy_service import DummyService\nservice = DummyService()\n", encoding="utf-8"
     )
+    importlib.invalidate_caches()
     assert load_service("svc_mod:service").id == "dummy"
     with pytest.raises(ValueError):
         load_service("no-colon")
     (tmp_path / "bad.py").write_text("service = object()\n", encoding="utf-8")
+    # 書いた直後の import は、ディレクトリの一覧がキャッシュされていて見つからないことがある
+    # （「No module named 'bad'」で時々落ちた）。作った直後にキャッシュを捨てる
+    importlib.invalidate_caches()
     with pytest.raises(TypeError):
         load_service("bad:service")
 
