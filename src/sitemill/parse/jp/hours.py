@@ -23,7 +23,8 @@ from sitemill.parse.jp.numbers import normalize_text
 
 # 区切り（NFKC 後は ～ が ~ に、〜 はそのまま残る）
 DASH = r"(?:〜|~|-|‐|–|—|ー|から|to)"
-_SEGMENT_SPLIT = re.compile(r"[、,;；/／\n]|(?<![0-9])・(?![0-9])")
+# 「※」で始まる注記は別の文。ここで切らないと、注記の曜日が本体の時間帯に付く
+_SEGMENT_SPLIT = re.compile(r"[、,;；/／\n※]|(?<![0-9])・(?![0-9])")
 _CLOCK = re.compile(
     r"(?P<ampm>午前|午後|am|pm)?\s*(?P<h>\d{1,2})\s*(?::|時)\s*(?P<m>\d{1,2})?\s*分?", re.I
 )
@@ -127,6 +128,18 @@ def _season(text: str) -> tuple[AnnualSpan | None, str]:
     return span, text[: m.start()] + " " + text[m.end() :]
 
 
+def _before_first_clock(text: str) -> str:
+    """最初の時刻より前の部分。曜日の指定はここにしか書かれない。
+
+    日本語の公式ページは「平日 9:00〜17:00」「土日祝 9:00〜18:00」と**曜日を先に**書く。
+    時刻より後に出てくる曜日は、例外や注記のものである。高松市美術館の
+    「午前9時30分〜午後5時 ※特別展開催期間中の金曜日・土曜日は午後7時まで」では、
+    後ろの「金曜日」が本体に付いてしまい、**金曜だけ開館している施設**になっていた。
+    """
+    m = _CLOCK_TOKEN.search(text)
+    return text[: m.start()] if m is not None else text
+
+
 def parse_opening_hours(quote: str) -> tuple[list[HoursPeriod] | None, str | None]:
     """開館時間の引用を HoursPeriod の並びにする。返り値は (値, 注記)。
 
@@ -157,7 +170,7 @@ def parse_opening_hours(quote: str) -> tuple[list[HoursPeriod] | None, str | Non
             continue
         if season is None:
             season = pending_season
-        days = parse_day_selector(rest) or DaySelector()
+        days = parse_day_selector(_before_first_clock(rest)) or DaySelector()
         periods.append(HoursPeriod(ranges=ranges, days=days, season=season, label=segment or None))
     if not periods:
         return None, "no_time_range"

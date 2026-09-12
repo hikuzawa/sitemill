@@ -38,8 +38,13 @@ _ALWAYS_OPEN = re.compile(r"年中無休|無休|休館日なし|定休日なし|
 _IRREGULAR = re.compile(r"不定休|不定期休")
 _SEGMENT_SPLIT = re.compile(r"[、,;；\n]|および|及び")
 
-# 「毎週月曜日」「月曜・火曜」「月〜水曜」
-_WEEKDAY_RUN = re.compile(rf"([{_WEEKDAY_CHARS}])\s*曜?\s*{DASH}\s*([{_WEEKDAY_CHARS}])\s*曜")
+# 「毎週月曜日」「月曜・火曜」「月〜水曜」。営業時間では「月〜金 9:00〜17:00」と
+# 「曜」を省く書き方が普通なので、末尾の「曜」は無くてもよい。ただし**数字の直後は見ない**
+# （「1月〜3月」を月曜〜月曜と読むと、季節の指定が曜日になってしまう）
+_WEEKDAY_RUN = re.compile(
+    rf"(?<![0-9０-９])([{_WEEKDAY_CHARS}])\s*曜?日?\s*{DASH}\s*"
+    rf"(?<![0-9０-９])([{_WEEKDAY_CHARS}])\s*曜?日?"
+)
 _WEEKDAY_ONE = re.compile(rf"([{_WEEKDAY_CHARS}])\s*曜")
 # 「第2・第4水曜日」「第1,3月曜」
 _NTH = re.compile(r"第\s*([0-9０-９][0-9０-９,、・\s第]*)\s*([" + _WEEKDAY_CHARS + r"])\s*曜")

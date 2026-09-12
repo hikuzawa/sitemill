@@ -31,6 +31,12 @@ LABEL_RE = re.compile(
     r"(氏名|お名前|ご担当者?|担当者|所有者|売主|貸主|貸主氏名|代表者|世帯主)\s*[:：]\s*"
     r"([^\s、。,.<>「」【】\r\n]{1,24})"
 )
+# 団体を表す語。これで終わる「◯◯様」は氏名ではない（「一般財団法人◯◯記念財団様」）
+_ORG_SUFFIX = re.compile(
+    r"(?:財団|法人|会社|協会|組合|機構|連盟|協議会|委員会|学校|大学|高校|病院|医院|"
+    r"神社|寺院|教会|役所|役場|支店|本店|本社|支部|事務所|事業団|公社|公団|商会|"
+    r"組|会|社|団|局|部|課|店|館|園|寺|宮)$"
+)
 _NAME_STOP = {
     "皆様",
     "皆さん",
@@ -162,6 +168,8 @@ def scan_text(text: str, *, policy: PiiPolicy | None = None, where: str = "") ->
         name, whole = m.group(1), m.group(0)
         if name in _NAME_STOP or whole in _NAME_STOP:
             continue
+        if _ORG_SUFFIX.search(name):
+            continue  # 「◯◯記念財団様」は団体宛の敬称で、氏名ではない
         findings.append(PiiFinding("name", whole, _snippet(scan, m.start(), m.end()), where))
     for m in LABEL_RE.finditer(scan):
         value = m.group(2).strip()

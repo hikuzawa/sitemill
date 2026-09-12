@@ -262,3 +262,51 @@ def test_a_time_without_a_season_heading_stays_unconditional() -> None:
 
 def test_a_lone_clock_is_not_a_range() -> None:
     assert parse_opening_hours("始発 8:36") == (None, "no_time_range")
+
+
+# --- 注記の曜日を本体に付けない（高松市美術館で実際に起きた） -----------------
+
+
+def test_a_note_after_the_time_does_not_restrict_the_weekdays() -> None:
+    """「※特別展開催期間中の金曜日・土曜日は午後7時まで」の金曜を本体に付けてはいけない。
+
+    付けると、毎日開いている美術館が**金曜だけ開館**になり、他の曜日は「不明」になる。
+    日本語の公式ページは曜日を時刻より先に書くので、時刻より後の曜日は例外や注記である。
+    """
+    quote = "\n".join(
+        [
+            "午前9時30分~午後5時",
+            "※展示室への入室は閉室時間の30分前まで",
+            "※特別展開催期間中の金曜日・土曜日は午後7時まで",
+        ]
+    )
+    periods, note = parse_opening_hours(quote)
+    assert note is None
+    assert periods is not None and len(periods) == 1
+    assert periods[0].days.every_day, periods[0].days
+    assert periods[0].ranges[0].start == time(9, 30)
+    assert periods[0].ranges[0].end == time(17, 0)
+
+
+def test_a_weekday_before_the_time_still_restricts_it() -> None:
+    periods, _ = parse_opening_hours("平日 9:00〜17:00、土日祝 9:00〜18:00")
+    assert periods is not None
+    assert periods[0].days.weekdays == (0, 1, 2, 3, 4)
+    assert periods[1].days.include_holidays is True
+
+
+def test_the_short_weekday_range_is_read() -> None:
+    """営業時間では「月〜金 9:00〜17:00」と「曜」を省く。読めないと毎日開館になる。"""
+    periods, _ = parse_opening_hours("月〜金 9:00〜17:00")
+    assert periods is not None
+    assert periods[0].days.weekdays == (0, 1, 2, 3, 4)
+
+
+def test_a_month_range_is_not_read_as_weekdays() -> None:
+    """「1月〜3月」の「月」を月曜と読むと、季節の指定が曜日になってしまう。"""
+    assert parse_day_selector("1月〜3月") is None
+    periods, _ = parse_opening_hours("3月〜9月 9:00〜17:00、10月〜2月 9:00〜16:30")
+    assert periods is not None
+    assert periods[0].season is not None
+    assert (periods[0].season.start_month, periods[0].season.end_month) == (3, 9)
+    assert periods[0].days.every_day

@@ -81,3 +81,14 @@ def test_analytics_missing_when_token_set(tmp_path: Path) -> None:
     _write_site(tmp_path, beacon=False)
     problems = preflight.check_site(tmp_path, analytics_token="tok")
     assert any("解析" in p for p in problems)
+
+
+def test_an_organisation_with_a_polite_suffix_is_not_a_personal_name() -> None:
+    """「一般財団法人◯◯記念財団様」は団体宛の敬称。氏名として止めるとビルドが通らない。"""
+    from sitemill.build.pii import scan_text
+
+    assert scan_text("一般財団法人◯◯記念財団様からの寄附に関して") == []
+    assert scan_text("株式会社さぬき様のご協力により") == []
+    assert scan_text("◯◯神社様の許可を得て掲載") == []
+    # 人の氏名はそのまま止める
+    assert [f.text for f in scan_text("田中様よりご寄贈いただきました")] == ["田中様"]
