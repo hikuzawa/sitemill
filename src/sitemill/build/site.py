@@ -306,6 +306,18 @@ class SiteBuilder:
             fmt_number=fmt_number,
             fmt_money=fmt_money,
         )
+        # 登録済みの画像資産（ADR 0020）。サービスが `assets(ws)` を持っていれば集める
+        self.registered_assets: set[str] = set()
+        collect = getattr(service, "assets", None)
+        if collect is not None:
+            for asset in collect(ws) or []:
+                if getattr(asset, "usable", False):
+                    self.registered_assets.add(asset.asset_id)
+                else:
+                    log.warning(
+                        "ライセンスを説明できない資産は使わない: %s",
+                        getattr(asset, "asset_id", "?"),
+                    )
         maker = getattr(service, "pii_policy", None)
         base_policy: PiiPolicy = (maker(ws) if maker else None) or default_jp_gov_policy()
         # 運営者自身の連絡先は第三者の個人情報ではないので許可する。
@@ -347,6 +359,9 @@ class SiteBuilder:
             path=page.meta.path,
             noindex=page.meta.noindex,
             expect_hreflang=bool(hreflangs),
+        )
+        problems += preflight.check_images(
+            html, path=page.meta.path, registered=self.registered_assets
         )
         if problems:
             raise BuildError(f"{page.meta.path}: {'; '.join(problems)}")

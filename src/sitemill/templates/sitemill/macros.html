@@ -85,6 +85,29 @@
 {{ analytics }}
 {% endmacro %}
 
+{# ライセンス通過画像の描画（ADR 0020）。`data-sitemill-asset` はビルド時検査が見る印。
+   クレジットには作者・ライセンス名・出どころのページ・取得日を必ず出す。
+   必要な文言カタログのキー: asset.credit（{author} {license}）/ asset.credit_source /
+   asset.fetched（{when}）。作者が取れないときは asset.credit_text にそのまま落ちる #}
+{% macro photo_figure(asset, locale, src) %}
+<figure class="sm-photo" data-embed="asset">
+  <img src="{{ src }}" alt="{{ asset.alt_text }}" data-sitemill-asset="{{ asset.asset_id }}" loading="lazy" decoding="async">
+  <figcaption class="sm-credit">
+    <span class="sm-credit-text">
+      {%- if asset.author and asset.license -%}
+      {{ t_in(locale, 'asset.credit', author=asset.author, license=asset.license.short_label) }}
+      {%- else -%}
+      {{ asset.credit_text }}
+      {%- endif -%}
+    </span>
+    {% if asset.page_url %}
+    <a href="{{ asset.page_url }}" rel="noopener nofollow" target="_blank">{{ t_in(locale, 'asset.credit_source') }}</a>
+    {% endif %}
+    <span class="sm-credit-fetched">{{ t_in(locale, 'asset.fetched', when=fmt_date(asset.fetched_at, locale)) }}</span>
+  </figcaption>
+</figure>
+{% endmacro %}
+
 {% macro field(label, fv, formatter=none) %}
 <dt>{{ label }}</dt>
 <dd>

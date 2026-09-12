@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from pathlib import Path
 
 from selectolax.parser import HTMLParser
@@ -60,6 +60,27 @@ def check_page_html(
             json.loads(block.strip())
         except json.JSONDecodeError as e:
             problems.append(f"{path}: JSON-LD #{i} が不正な JSON（{e}）")
+    return problems
+
+
+def check_images(html: str, *, path: str, registered: Collection[str]) -> list[str]:
+    """ページの `<img>` が、すべて登録済みの資産かを見る（ADR 0020）。
+
+    印は `data-sitemill-asset="<asset_id>"`。写真は権利の塊なので、出典とライセンスを
+    説明できないものが 1 枚でもあれば公開しない。サイト自身の図版はインライン SVG にするか、
+    自作（`own_work`）の資産として登録する。
+    """
+    problems: list[str] = []
+    for node in HTMLParser(html).css("img"):
+        src = (node.attributes.get("src") or "").strip()
+        asset_id = (node.attributes.get("data-sitemill-asset") or "").strip()
+        if not asset_id:
+            problems.append(
+                f"{path}: 出典の分からない画像がある（src={src[:80] or '空'}）。"
+                "data-sitemill-asset に登録済みの資産 id を入れる"
+            )
+        elif asset_id not in registered:
+            problems.append(f"{path}: 登録されていない資産 id の画像がある（{asset_id}）")
     return problems
 
 

@@ -31,6 +31,17 @@ LICENSE_LABELS: dict[LicenseId, str] = {
 }
 
 
+# 言語に依らない短い表記。多言語ページではこちらを出し、説明はカタログの文言で補う。
+LICENSE_SHORT: dict[LicenseId, str] = {
+    LicenseId.CC_BY_4_0: "CC BY 4.0",
+    LicenseId.CC_BY_3_0: "CC BY 3.0",
+    LicenseId.CC_BY_2_1_JP: "CC BY 2.1 JP",
+    LicenseId.CC0_1_0: "CC0 1.0",
+    LicenseId.GSTU_2_0: "GSTU 2.0",
+    LicenseId.MUNICIPAL_OPENDATA_CC_BY: "CC BY (municipal open data)",
+}
+
+
 def _now() -> datetime:
     return datetime.now(UTC).replace(microsecond=0)
 
@@ -73,3 +84,8 @@ class LicenseVerdict(BaseModel):
     @property
     def label(self) -> str:
         return LICENSE_LABELS[self.license_id] if self.license_id else "ライセンス未確認（不採用）"
+
+    @property
+    def short_label(self) -> str:
+        """言語に依らない表記（CC BY 4.0 など）。多言語ページのクレジットに使う。"""
+        return LICENSE_SHORT[self.license_id] if self.license_id else ""
