@@ -51,7 +51,8 @@ class Exclusion:
 @dataclass(frozen=True)
 class Thresholds:
     min_approval_rate: float | None = None  # 確定率がこれ未満なら除外
-    min_epc_yen: int | None = None
+    # EPC がこれ未満なら保留（確定率と EPC の両方が読めているときだけ見る。ADR 0022）
+    min_epc_yen: float | None = None
     min_reward_yen: int | None = None
     min_score: float = 50.0  # これ未満は「保留」（除外ではない）
     warn_approval_rate: float | None = None  # これ未満なら注記を付ける
@@ -172,7 +173,7 @@ def from_dict(data: dict[str, Any], *, name: str = "") -> Profile:
         region_reason=str(region.get("reason", DEFAULT_REGION_REASON)),
         thresholds=Thresholds(
             min_approval_rate=_opt_float(th.get("min_approval_rate")),
-            min_epc_yen=_opt_int(th.get("min_epc_yen")),
+            min_epc_yen=_opt_float(th.get("min_epc_yen")),
             min_reward_yen=_opt_int(th.get("min_reward_yen")),
             min_score=float(th.get("min_score", 50.0)),
             warn_approval_rate=_opt_float(th.get("warn_approval_rate")),

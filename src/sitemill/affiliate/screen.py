@@ -1,11 +1,12 @@
 """案件の判定と並べ替え（ADR 0019）。
 
 判定は 2 段。まず「出してはいけないもの」を落とし（除外）、残りに点をつけて申請順に並べる。
+落とす理由は無いが今は申請しない、というものは除外せず保留にする。
 
 除外（1 つでも当たれば不採用。順に見て、最初に当たった理由をそのまま出す）
 1. 信頼性: プロファイルの `exclusions` に当たる（情報商材・投資セミナーなど）
 2. 導線: どの導線にも当てはまらない
-3. しきい値: 確定率・EPC・報酬が下限を割る
+3. しきい値: 確定率・報酬が下限を割る（EPC の下限は除外ではなく保留。ADR 0022）
 
 点（満点 100。内訳はプロファイルの `weights`）
 - 導線適合: 案件名に導線の語があれば満点、成果条件や広告主名だけなら減点
@@ -13,17 +14,20 @@
 - 確定率: 下限から 100% までを線形に割り当てる。記載が無ければ既定の比で置く
 - 稼ぎ: EPC があれば EPC、無ければ報酬額
 
-保留は 2 通り。どちらも除外せず、点と根拠をつけたまま表に残す。
-- 点が `thresholds.min_score` に届かない（落とす理由はないが、今すぐ申請する理由もない）
+保留は 4 通り。どれも除外せず、点と根拠をつけたまま表に残す。理由は根拠の先頭に出す。
 - 成果の出る地域がサイトの対象地域と重ならない（ADR 0021）。
   今の枠には出せないが、将来その地域のページにだけ出す候補として残す
+- 確定率が読めない（ADR 0022）。低いのではなく分からないので、申請の判断材料が足りない
+- EPC が下限未満（ADR 0022）。**確定率と EPC の両方が読めているときだけ**見る。
+  確定率が高くても、実際には申し込まれていない案件を弾く
+- 点が `thresholds.min_score` に届かない（落とす理由はないが、今すぐ申請する理由もない）
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from sitemill.affiliate.models import Candidate, Screened, Verdict
+from sitemill.affiliate.models import Candidate, Screened, Verdict, number
 from sitemill.affiliate.profile import Funnel, Profile
 from sitemill.parse.jp import normalize_text
 
@@ -92,10 +96,6 @@ def _screen_one(cand: Candidate, profile: Profile) -> Screened:
                 f"確定率 {cand.approval_rate:g}% が下限 {th.min_approval_rate:g}% 未満",
                 kind=funnel.kind,
             )
-    if th.min_epc_yen is not None and cand.epc_yen is not None and cand.epc_yen < th.min_epc_yen:
-        return _reject(
-            cand, f"EPC {cand.epc_yen:,}円 が下限 {th.min_epc_yen:,}円 未満", kind=funnel.kind
-        )
     if (
         th.min_reward_yen is not None
         and cand.reward_yen is not None
@@ -106,6 +106,9 @@ def _screen_one(cand: Candidate, profile: Profile) -> Screened:
             f"報酬 {cand.reward_yen:,}円 が下限 {th.min_reward_yen:,}円 未満",
             kind=funnel.kind,
         )
+
+    # 除外はしないが、このままでは申請しない理由
+    holds = _hold_reasons(cand, profile, region)
 
     # 点をつける
     w = profile.weights
@@ -126,23 +129,36 @@ def _screen_one(cand: Candidate, profile: Profile) -> Screened:
         "稼ぎ": earning_score * w.earning,
     }
     total = sum(breakdown.values())
-    verdict = Verdict.apply if total >= th.min_score else Verdict.hold
-    if verdict is Verdict.hold:
-        reasons.append(f"合計 {total:.0f} 点が申請の目安 {th.min_score:g} 点に届かない")
-    if region:
-        verdict = Verdict.hold
-        reasons.append(region)
+    if total < th.min_score:
+        holds.append(f"合計 {total:.0f} 点が申請の目安 {th.min_score:g} 点に届かない")
     return Screened(
         candidate=cand,
-        verdict=verdict,
+        verdict=Verdict.hold if holds else Verdict.apply,
         score=total,
         kind=funnel.kind,
         placements=funnel.placements,
         condition_tier=tier_id,
         region_limited=bool(region),
         breakdown=breakdown,
-        reasons=tuple(reasons),
+        reasons=tuple([*holds, *reasons]),  # 保留の理由を先に出す
     )
+
+
+def _hold_reasons(cand: Candidate, profile: Profile, region: str | None) -> list[str]:
+    """除外はしないが、このままでは申請しない理由。空なら申請してよい。"""
+    th = profile.thresholds
+    out: list[str] = [region] if region else []
+    if cand.approval_rate is None:
+        out.append("確定率が読めない。申請するかどうかの材料が足りないので保留にする")
+    elif th.min_epc_yen is not None and cand.epc_yen is not None:
+        # 確定率と EPC の両方が読めているときだけ見る。確定率が高くても、
+        # EPC が低いなら実際には申し込まれていない
+        if cand.epc_yen < th.min_epc_yen:
+            out.append(
+                f"EPC {cand.epc_label} が下限 {number(th.min_epc_yen)}円 未満"
+                f"（確定率 {cand.approval_label} でも申し込まれていない）"
+            )
+    return out
 
 
 def _reject(cand: Candidate, reason: str, *, kind: str = "") -> Screened:
@@ -220,7 +236,7 @@ def _approval_score(cand: Candidate, profile: Profile) -> tuple[float, str]:
 def _earning_score(cand: Candidate, profile: Profile) -> tuple[float, str]:
     e = profile.earning
     if cand.epc_yen is not None:
-        return min(1.0, cand.epc_yen / max(e.epc_full_yen, 1)), f"EPC {cand.epc_yen:,}円"
+        return min(1.0, cand.epc_yen / max(e.epc_full_yen, 1)), f"EPC {cand.epc_label}"
     if cand.reward_yen is not None:
         return (
             min(1.0, cand.reward_yen / max(e.reward_full_yen, 1)),

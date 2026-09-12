@@ -76,7 +76,9 @@ exclusions:
 
 thresholds:
   min_approval_rate: 30 # 確定率がこれ未満なら除外（記載が無いものは落とさない）
-  min_epc_yen: null # EPC の下限。使わないなら null
+  # EPC がこれ未満なら保留。確定率と EPC の両方が読めているときだけ見る（ADR 0022）。
+  # 確定率が高くても EPC が低い案件は、実際には申し込まれていない
+  min_epc_yen: 10
   min_reward_yen: 500 # これ未満の報酬は手間に合わない
   min_score: 55 # これ未満は「保留」。除外ではない
   warn_approval_rate: 60 # これを下回ったら表に注記を出す

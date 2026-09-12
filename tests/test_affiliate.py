@@ -192,3 +192,124 @@ def test_emit_code_leaves_none_for_missing_numbers(result, profile):
 def test_suggest_offer_id_does_not_invent_romaji():
     assert suggest_offer_id("【解体工事110番】") == "110"
     assert suggest_offer_id("遺品整理") == ""
+
+
+# --- 縦並び・空行入りの一覧（A8 の実データで確かめた形。ADR 0022）-----------------
+
+VERTICAL = Path(__file__).parent / "fixtures" / "affiliate" / "asp-list-vertical.txt"
+# 案件名として拾ってはいけない画面の部品
+CHROME = (
+    "サンプルASP ロゴ",
+    "一括提携する",
+    "未提携",
+    "提携申請中",
+    "広告主サイト",
+    "広告サンプル",
+    "セルフバックを見る",
+    "プログラム詳細を見る",
+    "アイコンについて",
+)
+
+
+@pytest.fixture
+def vertical():
+    return parse_offers(VERTICAL.read_text(encoding="utf-8"), asp="a8")
+
+
+@pytest.fixture
+def vertical_result(vertical, profile):
+    return screen(vertical, profile)
+
+
+def test_splits_on_repeated_fields_not_on_blank_lines(vertical):
+    """案件の内側に空行が 3 行入っても割れない。同じ項目の二度目で切る。"""
+    assert len(vertical) == 4
+    assert [c.name for c in vertical] == [
+        "空き家の解体費用を一括見積【サンプル解体ナビ】",
+        "相続した空き家の査定なら【サンプル査定ドットコム】",
+        "空き家の買取【サンプル買取センター】",
+        "遺品整理・生前整理の【サンプル片づけ本舗】",
+    ]
+    assert [c.advertiser for c in vertical] == [
+        "サンプル解体株式会社",
+        "株式会社サンプル査定",
+        "サンプル買取株式会社",
+        "サンプル片づけ株式会社",
+    ]
+
+
+def test_reads_labels_stacked_above_their_values(vertical):
+    """ラベルが単独行・値が次の行でも読む。EPC は小数のまま持つ。"""
+    c = vertical[0]
+    assert c.reward_yen == 8000
+    assert c.approval_rate == 82.5
+    assert c.epc_yen == 56.3
+    assert c.epc_label == "56.3円"
+    assert vertical[3].epc_yen == 120.5
+    assert c.review_required is True  # ラベルの無い「未提携」も提携状況として読む
+
+
+def test_dash_means_no_record_not_a_broken_paste(vertical):
+    """「-」は記載なし。読めなかった項目として残し、他の項目の読み取りは壊さない。"""
+    c = vertical[1]
+    assert c.approval_rate is None
+    assert c.epc_yen is None
+    assert c.notes == ("確定率の記載なし", "EPC の記載なし")
+    assert c.reward_yen == 17000  # 同じ案件の他の項目は読めている
+
+
+def test_screen_parts_never_become_the_offer(vertical):
+    """「広告サンプル」「プログラム詳細を見る」「未提携」などは案件名にも広告主にもしない。"""
+    for c in vertical:
+        assert c.name not in CHROME
+        assert c.advertiser not in CHROME
+    assert all("プログラム検索条件" not in c.raw for c in vertical)  # 一覧の見出しも入れない
+
+
+def test_tiered_reward_keeps_the_quote_and_the_first_amount(vertical):
+    """段組みの報酬（▽一般 / ▽ポイントサイト）でも金額を 1 つ決める。"""
+    c = vertical[2]
+    assert c.reward_yen == 12000
+    assert "▽一般" in c.reward_quote
+
+
+def test_condition_comes_from_the_reward_cell(vertical):
+    """成果条件と金額が同じ欄に入る ASP では、金額を外した残りを条件の原文にする。"""
+    assert vertical[0].condition == "無料見積依頼"
+    assert vertical[1].condition == "新規査定申込"
+
+
+def test_explicit_separator_splits_records():
+    """空行で切れないので、切りたいところには --- を入れる。"""
+    text = "\n".join(["案件A", "成果報酬 1,000円", "---", "案件B", "成果報酬 2,000円"])
+    got = parse_offers(text)
+    assert [c.name for c in got] == ["案件A", "案件B"]
+
+
+def test_unknown_approval_rate_is_held(vertical_result):
+    """確定率が読めない案件は申請に回さない（除外もしない）。"""
+    s = next(x for x in vertical_result.items if "サンプル査定ドットコム" in x.candidate.name)
+    assert s.verdict is Verdict.hold
+    assert "確定率が読めない" in s.reasons[0]
+
+
+def test_low_epc_is_held_only_when_the_rate_is_also_known(vertical, profile):
+    """EPC の下限は、確定率と EPC の両方が読めているときだけ見る。"""
+    low = next(c for c in vertical if "サンプル買取センター" in c.name)
+    assert low.approval_rate == 100.0 and low.epc_yen == 3.04
+    held = screen([low], profile).items[0]
+    assert held.verdict is Verdict.hold
+    assert "EPC" in held.reasons[0] and "下限" in held.reasons[0]
+
+    # 確定率が読めないなら、保留の理由は EPC ではなく確定率のほう
+    blind = screen([replace(low, approval_rate=None)], profile).items[0]
+    assert blind.verdict is Verdict.hold
+    assert [r for r in blind.reasons if "EPC" in r and "下限" in r] == []
+    assert "確定率が読めない" in blind.reasons[0]
+
+
+def test_epc_above_the_floor_still_applies(vertical_result):
+    """EPC が下限を超えていれば、保留の理由にはしない。"""
+    s = next(x for x in vertical_result.items if "サンプル解体ナビ" in x.candidate.name)
+    assert s.verdict is Verdict.apply
+    assert s.candidate.epc_yen == 56.3

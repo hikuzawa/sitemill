@@ -304,7 +304,10 @@ def offers_screen(
     prof = _profile(profile_path)
     candidates = parse_offers(_paste(input_path), asp=asp)
     if not candidates:
-        typer.echo("案件を 1 件も取り出せなかった。案件と案件の間に空行を入れて貼り直す", err=True)
+        typer.echo(
+            "案件を 1 件も取り出せなかった。案件と案件の間に --- の行を入れて貼り直す",
+            err=True,
+        )
         raise typer.Exit(code=1)
     result = screen(candidates, prof)
     report = markdown_report(result)

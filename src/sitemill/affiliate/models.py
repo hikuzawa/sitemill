@@ -13,6 +13,13 @@ from enum import StrEnum
 from typing import Any
 
 
+def number(value: float | int | None) -> str:
+    """桁区切りの数。整数なら小数点以下を出さない（96 円と 56.3 円を同じ書式で扱う）。"""
+    if value is None:
+        return "不明"
+    return f"{value:,.0f}" if float(value).is_integer() else f"{value:,}"
+
+
 class Verdict(StrEnum):
     """案件をどうするか。"""
 
@@ -33,7 +40,7 @@ class Candidate:
     reward_rate: float | None = None  # 売上に対する％の案件
     condition: str = ""  # 成果条件の原文
     approval_rate: float | None = None  # 確定率（％）
-    epc_yen: int | None = None
+    epc_yen: float | None = None  # ASP は小数で出す（A8 は「56.3」）ので丸めない
     cookie_days: int | None = None  # 再訪問期間
     review_required: bool | None = None  # 提携審査。即時提携なら False
     region_quotes: tuple[str, ...] = ()  # 地域制限として読めた原文
@@ -48,6 +55,15 @@ class Candidate:
         if self.reward_rate is not None:
             return f"売上の{self.reward_rate:g}%"
         return self.reward_quote or "不明"
+
+    @property
+    def epc_label(self) -> str:
+        """表に出す EPC の表記。小数のときだけ小数点以下を見せる。"""
+        return f"{number(self.epc_yen)}円" if self.epc_yen is not None else "不明"
+
+    @property
+    def approval_label(self) -> str:
+        return f"{self.approval_rate:g}%" if self.approval_rate is not None else "不明"
 
     @property
     def review_label(self) -> str:
