@@ -71,9 +71,13 @@ def test_unreadable_hours_stay_unparsed() -> None:
         assert value is None and note is not None
 
 
-def test_always_open_text_is_not_turned_into_a_time_range() -> None:
-    value, note = parse_opening_hours("24時間")
-    assert value is None and note == "always_open_text"
+def test_explicit_free_access_becomes_a_value() -> None:
+    """「入園自由」は時間帯が無いが、開いていることは分かる。unknown にしない。"""
+    for text in ("24時間", "入園自由", "常時開放", "見学自由"):
+        periods, note = parse_opening_hours(text)
+        assert note == "always_open", text
+        assert periods is not None and periods[0].always_open, text
+        assert periods[0].ranges == [], text
 
 
 # --- 定休日 -----------------------------------------------------------------

@@ -39,3 +39,13 @@ def test_jsonl_roundtrip_keeps_japanese(tmp_path: Path) -> None:
     text = path.read_text(encoding="utf-8")
     assert '{"a": 1, "b": "東御市"}' in text
     assert read_jsonl(path) == rows
+
+
+def test_json_handles_times_as_well_as_dates() -> None:
+    """開館時間の規則は time を持つ（ADR 0018）。date だけ扱えると保存時に落ちる。"""
+    from datetime import date, time
+
+    from sitemill.store.jsonio import dumps
+
+    assert '"10:00:00"' in dumps({"open": time(10, 0)})
+    assert '"2026-09-12"' in dumps({"day": date(2026, 9, 12)})

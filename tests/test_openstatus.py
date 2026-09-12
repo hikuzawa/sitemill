@@ -384,3 +384,29 @@ def test_resolve_week_covers_the_silver_week() -> None:
     assert states[date(2026, 9, 22)] is DayState.unknown
     assert states[date(2026, 9, 23)] is DayState.open
     assert states[date(2026, 9, 25)] is DayState.open
+
+
+# --- 時間の指定が無い施設（砂浜・境内）------------------------------------
+
+
+def test_explicit_always_open_is_open_not_unknown() -> None:
+    """「入園自由」と原文が言っているなら開いている。砂浜に「不明」と出さない（ADR 0004）。"""
+    free = [HoursPeriod(always_open=True, label="入園自由")]
+    v = resolve_day(date(2026, 9, 12), hours=free, holidays=CAL)
+    assert v.state is DayState.open
+    assert v.has(ReasonCode.always_open) and v.periods == []
+
+
+def test_always_open_still_closes_on_a_closing_rule() -> None:
+    """常時開放でも、休園日の規則があればその日は休み。"""
+    free = [HoursPeriod(always_open=True, label="入園自由")]
+    rule = ClosureRule(kind=ClosureKind.weekly, weekdays=(0,), label="月曜休園")
+    assert resolve_day(date(2026, 9, 14), hours=free, closures=[rule], holidays=CAL).state is (
+        DayState.closed
+    )
+
+
+def test_missing_hours_is_still_unknown() -> None:
+    """「書いていない」と「いつでも入れる」は別。時間が無いだけなら不明のまま。"""
+    v = resolve_day(date(2026, 9, 12), hours=[HoursPeriod()], holidays=CAL)
+    assert v.state is DayState.unknown and v.has(ReasonCode.no_data)

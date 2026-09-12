@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable
-from datetime import date, datetime
+from datetime import date, datetime, time
 from pathlib import Path
 from typing import Any
 
@@ -14,7 +14,7 @@ from pydantic import BaseModel
 def _default(o: Any) -> Any:
     if isinstance(o, BaseModel):
         return o.model_dump(mode="json")
-    if isinstance(o, datetime | date):
+    if isinstance(o, datetime | date | time):
         return o.isoformat()
     if isinstance(o, Path):
         return str(o)

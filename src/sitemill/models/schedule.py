@@ -140,11 +140,18 @@ class AnnualSpan(BaseModel):
 
 
 class HoursPeriod(BaseModel):
-    """ある条件の日に当てはまる開館時間。"""
+    """ある条件の日に当てはまる開館時間。
+
+    `always_open` は「時間の指定が無い」ことを**原文が明示している**場合に立てる
+    （「入園自由」「24時間」など）。時間が見つからなかっただけのときは立てない。
+    「書いていない」と「いつでも入れる」は別のことなので、区別しないと砂浜や境内に
+    「不明」と出すか、逆に何も書いていない施設を「いつでも開いている」と誤って言うことになる。
+    """
 
     ranges: list[TimeRange] = Field(default_factory=list)
     days: DaySelector = Field(default_factory=DaySelector)
     season: AnnualSpan | None = None
+    always_open: bool = False
     label: str | None = None
     evidence: Evidence | None = None
 

@@ -36,7 +36,8 @@ _SEASON = re.compile(
     rf"(?P<sm>\d{{1,2}})\s*月\s*(?:(?P<sd>\d{{1,2}})\s*日)?\s*{DASH}\s*"
     rf"(?P<em>\d{{1,2}})\s*月\s*(?:(?P<ed>\d{{1,2}})\s*日)?"
 )
-_NO_TIME_MARKERS = re.compile(r"24\s*時間|終日|常時")
+# 原文が「時間の指定が無い」と明示している書き方。値として持つ（unknown にしない）
+_ALWAYS_OPEN = re.compile(r"24\s*時間|終日|常時開放|常時開園|入[園館場]自由|見学自由|随時")
 
 
 def parse_clock(text: str) -> time | None:
@@ -120,10 +121,10 @@ def parse_opening_hours(quote: str) -> tuple[list[HoursPeriod] | None, str | Non
     if not quote or not quote.strip():
         return None, "no_text"
     text = normalize_text(quote)
-    if _NO_TIME_MARKERS.search(text):
-        # 「24時間」「終日」は時間帯として表せるが、施設ごとに意味が違う（入場自由 / 無人）。
-        # 値にせず注記だけ残す
-        return None, "always_open_text"
+    if _ALWAYS_OPEN.search(text):
+        # 「入園自由」「24時間」。時間帯は無いが**開いていることは分かる**ので値にする。
+        # 時間が書かれていないだけの施設（unknown）と区別する
+        return [HoursPeriod(always_open=True, label=text[:60])], "always_open"
 
     periods: list[HoursPeriod] = []
     for segment in _SEGMENT_SPLIT.split(text):

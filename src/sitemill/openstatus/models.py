@@ -24,6 +24,7 @@ class ReasonCode(StrEnum):
     """判定の根拠。表示の文言はサービスがロケールごとに用意する。"""
 
     regular_hours = "regular_hours"  # 通常の開館時間
+    always_open = "always_open"  # 時間の指定が無い（入園自由と原文が明示）
     weekly_closed = "weekly_closed"  # 毎週の定休日
     nth_weekday_closed = "nth_weekday_closed"  # 第 n 曜日の定休日
     annual_closed = "annual_closed"  # 年末年始などの期間

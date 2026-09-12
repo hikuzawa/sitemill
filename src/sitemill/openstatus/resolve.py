@@ -239,11 +239,15 @@ def _rule_fetched_at(rules: Sequence[ClosureRule], hours: Sequence[HoursPeriod])
 
 def periods_for(
     hours: Sequence[HoursPeriod], day: date, holidays: HolidayCalendar
-) -> tuple[list[TimeRange], bool]:
-    """その日に当てはまる時間帯。返り値は (時間帯, 祝日が分からず決められなかったか)。"""
+) -> tuple[list[TimeRange], bool, bool]:
+    """その日に当てはまる時間帯。
+
+    返り値は (時間帯, 祝日が分からず決められなかったか, 常時開放か)。
+    """
     is_holiday: bool | None = holidays.name(day) is not None if holidays.covers(day) else None
     ranges: list[TimeRange] = []
     undecided = False
+    always = False
     for period in hours:
         applies = period.applies_to(day, is_holiday=is_holiday)
         if applies is None:
@@ -251,7 +255,8 @@ def periods_for(
             continue
         if applies:
             ranges.extend(period.ranges)
-    return ranges, undecided
+            always = always or period.always_open
+    return ranges, undecided, always
 
 
 def resolve_day(
@@ -334,8 +339,11 @@ def resolve_day(
     # 4. 開館時間
     periods: list[TimeRange] = []
     if state is DayState.open:
-        periods, undecided = periods_for(hours, day, holidays)
-        if undecided and not periods:
+        periods, undecided, always = periods_for(hours, day, holidays)
+        if always:
+            # 原文が「入園自由」と言っている。時間帯は無いが開いている
+            reasons.insert(0, Reason(code=ReasonCode.always_open))
+        elif undecided and not periods:
             state = DayState.unknown
             reasons.append(
                 Reason(
