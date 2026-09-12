@@ -281,6 +281,12 @@ class SiteBuilder:
             """描画中のページのロケールで文言を引く。無ければ既定ロケールに落ちる。"""
             return translate_in(_ctx_code(ctx), key, **params)
 
+        def has_translation(locale: LocaleConfig | str | None, key: str) -> bool:
+            """その文言が定義されているか。任意の文言をマクロで扱うときに使う。"""
+            code = _code_of(locale) or site.default_locale.code
+            catalog = self.catalogs.get(code) or self.catalogs[site.default_locale.code]
+            return catalog.has(key)
+
         analytics = analytics_snippet(ws.site.analytics.provider, ws.secrets.cf_web_analytics_token)
         self.env.globals.update(
             site=ws.site,
@@ -291,6 +297,7 @@ class SiteBuilder:
             url_for=ws.site.url,
             t=translate,
             t_in=translate_in,
+            t_has=has_translation,
             locales=site.locale_list,
             default_locale=site.default_locale,
             fmt_date=fmt_date,

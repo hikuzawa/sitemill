@@ -33,7 +33,8 @@
 {# 多言語版の信頼ブロック。ロケールを明示して渡す（マクロの中からは描画中の context が見えないため）。
    必要な文言カタログのキー（i18n/<locale>.yaml）:
      trust.title / trust.updated / trust.timezone / trust.count / trust.count_value（{count}）
-     trust.sources / trust.sources_default / trust.fetched（{when}）/ trust.operator / trust.contact / trust.details #}
+     trust.sources / trust.sources_default / trust.fetched（{when}）/ trust.operator / trust.contact / trust.details
+   任意: trust.contact_link（連絡先が URL のときのリンク文字列。無ければ [operator] contact_label → URL） #}
 {% macro trust_block_l(trust, locale) %}
 <section class="trust" data-sitemill-trust aria-label="{{ t_in(locale, 'trust.title') }}">
   <h2 class="trust-title">{{ t_in(locale, 'trust.title') }}</h2>
@@ -59,7 +60,7 @@
     <dt>{{ t_in(locale, 'trust.operator') }}</dt>
     <dd>{{ trust.operator.name }}{% if trust.operator.url %} (<a href="{{ trust.operator.url }}">{{ t_in(locale, 'trust.details') }}</a>){% endif %}</dd>
     <dt>{{ t_in(locale, 'trust.contact') }}</dt>
-    <dd>{{ trust.operator.contact }}</dd>
+    <dd>{% if trust.operator.contact.startswith("http") %}<a href="{{ trust.operator.contact }}" rel="noopener" target="_blank">{% if t_has(locale, 'trust.contact_link') %}{{ t_in(locale, 'trust.contact_link') }}{% else %}{{ trust.operator.contact_label or trust.operator.contact }}{% endif %}</a>{% else %}{{ trust.operator.contact }}{% endif %}</dd>
   </dl>
 </section>
 {% endmacro %}

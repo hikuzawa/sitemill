@@ -19,7 +19,7 @@
 ## 守ること
 - 対話・報告・質問は日本語で行う（コードとコミットメッセージは英語でよい）
 - 汎用ロジックだけを置く。特定サービスの URL・スキーマ・テンプレートはサービス側へ
-- **akiya-atlas の CI は sitemill のタグ固定（現在 `v0.1.0`）。main の変更は自動では反映されない**。main は別サービス向けの拡張に使ってよい。空き家側に届けるにはタグを打ち、akiya-atlas の `.github/workflows/` 3 本の `ref:` を上げる（手順は akiya-atlas の `docs/runbook/operations.md` 5 章）。破壊的変更はマイナー版（v0.x.0）で出す
+- **akiya-atlas の CI は sitemill のタグ固定（現在 `v0.1.1`）。main の変更は自動では反映されない**。main は別サービス向けの拡張に使ってよい。空き家側に届けるにはタグを打ち、akiya-atlas の `.github/workflows/` 3 本の `ref:` を上げる（手順は akiya-atlas の `docs/runbook/operations.md` 5 章）。破壊的変更はマイナー版（v0.x.0）で出す
 - 数値は LLM に決めさせない。LLM は原文の引用を返し、`parse/jp` の決定的パーサだけが値にする（quote-then-parse、ADR 0004）
 - ライセンス判定は既定で不採用。ホワイトリストに一致した証拠がある場合のみ採用（ADR 0005）
 - 発見の確信度づけでは、運営主体が確認できた候補は自動採用し、レビュー行列に残すのは運営主体が判定できないものだけにする（akiya-atlas ADR 0007）。人間の作業を最小にする

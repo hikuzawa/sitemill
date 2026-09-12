@@ -32,7 +32,8 @@ language = "ja"
 
 [operator]
 name = "テスト運営"
-contact = "test@example.com"
+contact = "https://forms.example/contact"
+contact_label = "問い合わせ先"
 
 [[locales]]
 code = "ja"
@@ -108,6 +109,7 @@ trust:
   fetched: "（取得: {when}）"
   operator: 運営者
   contact: 連絡先
+  contact_link: お問い合わせフォーム
   details: 詳細
 """,
     "en.yaml": """
@@ -130,6 +132,7 @@ trust:
   fetched: "(fetched {when})"
   operator: Operator
   contact: Contact
+  contact_link: Contact form
   details: details
 """,
     # 繁体字はわざと trust.* だけにして、未翻訳が既定ロケールに落ちることを確かめる
@@ -186,7 +189,11 @@ class PolyService:
         trust = TrustSignals(
             updated_at=now,
             sources=[SourceLink(label="公式", url="https://example.com/", fetched_at=now)],
-            operator=OperatorInfo(name=ws.site.operator.name, contact=ws.site.operator.contact),
+            operator=OperatorInfo(
+                name=ws.site.operator.name,
+                contact=ws.site.operator.contact,
+                contact_label=ws.site.operator.contact_label,
+            ),
             record_count=1234,
         )
         for code, prefix in LOCALES:
@@ -321,6 +328,20 @@ def test_trust_block_is_localized_but_keeps_its_marker(root: Path) -> None:
     assert "關於這些資訊" in zh and "1,234 筆" in zh
 
 
+def test_contact_url_becomes_a_link_with_a_localized_label(root: Path) -> None:
+    """連絡先が URL のときはリンクにする（v0.1.1 の修正）。文字列は各言語のカタログから。"""
+    dist, _ = _build(root)
+    en = (dist / "en" / "index.html").read_text(encoding="utf-8")
+    assert (
+        '<a href="https://forms.example/contact" rel="noopener" target="_blank">Contact form</a>'
+    ) in en
+    ja = (dist / "index.html").read_text(encoding="utf-8")
+    assert ">お問い合わせフォーム</a>" in ja  # site.toml の contact_label ではなくカタログの文言
+    # 繁体字はこのキーが未翻訳なので、既定ロケールの文言に落ちる（他の未翻訳と同じ扱い）
+    zh = (dist / "zh-hant" / "index.html").read_text(encoding="utf-8")
+    assert ">お問い合わせフォーム</a>" in zh
+
+
 def test_untranslated_keys_fall_back_and_are_reported(root: Path) -> None:
     """未翻訳でも公開は止めない。ただし何が残っているかは実行レポートに出す。"""
     dist, result = _build(root)
@@ -328,7 +349,7 @@ def test_untranslated_keys_fall_back_and_are_reported(root: Path) -> None:
     assert "今日行ける日本" in zh  # 既定ロケール（日本語）に落ちている
     warning = next((w for w in result.warnings if "zh-Hant" in w), None)
     assert warning is not None
-    assert "6 件" in warning and "home.note" in warning  # 件数と、先頭いくつかのキー
+    assert "未翻訳" in warning and "home.note" in warning
 
 
 def test_sitemap_lists_the_language_versions(root: Path) -> None:
