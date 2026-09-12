@@ -1,3 +1,4 @@
+from sitemill.diff.normalize import squash
 from sitemill.extract import (
     ExtractionSpec,
     QuoteField,
@@ -6,6 +7,7 @@ from sitemill.extract import (
     prepare_input,
 )
 from sitemill.extract.llm import FixtureProvider
+from sitemill.extract.quotes import verify_quote
 from sitemill.metrics import ExtractionMetrics
 from sitemill.models import FieldStatus
 from sitemill.parse.jp import parse_area_m2, parse_year, parse_yen
@@ -124,3 +126,36 @@ def test_metrics_merge_and_table() -> None:
     assert a.rates()["price"] == 0.5
     table = a.table()
     assert "price" in table and "pages=2" in table
+
+
+# --- 表の行を繋いだ引用 -----------------------------------------------------
+
+
+def test_a_quote_that_joins_table_rows_is_accepted_fragment_by_fragment() -> None:
+    """表から値を取ると LLM は行を「、」で繋いで返す。本文にその文字は無い。
+
+    寒霞渓の営業時間は 4 季節の表で、本文では各セルが改行で区切られている。全体照合だけだと
+    毎回落ちて、時間が永久に取れない。断片すべてが逐語で本文にあることを条件に認める。
+    """
+    source = squash("区分 営業時間\n03/21~10/20\n8:30~17:00\n10/21~11/30\n8:00~17:00")
+    assert verify_quote("03/21~10/20 8:30~17:00、10/21~11/30 8:00~17:00", source) == (
+        True,
+        "quote_joined",
+    )
+    # 断片が 1 つでも本文に無ければ認めない（時刻を作った引用はここで落ちる）
+    assert verify_quote("03/21~10/20 9:00~19:00、10/21~11/30 8:00~17:00", source) == (False, None)
+
+
+def test_digits_are_not_split_at_thousand_separators_or_slashed_dates() -> None:
+    """「2,340円」「03/21」で切ると短い断片になり、照合が意味を失う。"""
+    source = squash("大人 2,340円\n小人 1,170円")
+    assert verify_quote("大人 2,340円、小人 1,170円", source) == (True, "quote_joined")
+    assert verify_quote("大人 9,999円、小人 1,170円", source) == (False, None)
+
+
+def test_the_joined_note_reaches_the_field() -> None:
+    data = {"listings": [{"listing_no": "9", "address_quote": "所在地 東御市祢津、価格 980万円"}]}
+    items, _ = apply_spec(SPEC, data, SOURCE)
+    address = items[0].fields["address"]
+    assert address.ok
+    assert address.note == "quote_joined"

@@ -34,6 +34,9 @@ class ExtractionSpec:
     summary_max_chars: int = 120
     verbatim_overlap_chars: int = 30
     summary_fallback: Callable[[dict[str, Any]], str] | None = None
+    # 本文から取れなかったとき、schema.org の JSON-LD の営業時間で埋める項目名。
+    # 宣言しない限り何もしない（既存サービスの挙動を変えない）
+    structured_hours_target: str | None = None
 
     def user_prompt(self, *, url: str, kind: str, text: str) -> str:
         """ページ本文を「データ」として渡す。本文中の指示には従わないよう区切りを明示する。"""

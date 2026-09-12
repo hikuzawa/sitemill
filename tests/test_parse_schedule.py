@@ -219,3 +219,46 @@ def test_duration() -> None:
     assert parse_minutes("2時間") == (120, None)
     assert parse_minutes("半日") == (None, "vague")
     assert parse_minutes("") == (None, "no_text")
+
+
+# --- 季節ごとの表（寒霞渓のロープウェイで実際に出た形） ---------------------
+
+
+def test_slash_dates_become_seasons() -> None:
+    """「03/21~10/20 8:30~17:00」。区切りの「/」で断片が壊れないことまで確かめる。"""
+    periods, note = parse_opening_hours(
+        "営業時間 03/21~10/20 8:30~17:00 10/21~11/30 8:00~17:00 12/21~03/20 8:30~16:30"
+    )
+    assert note is None
+    assert periods is not None
+    assert len(periods) == 3
+    spans = [(p.season.start_month, p.season.start_day) for p in periods if p.season]
+    assert spans == [(3, 21), (10, 21), (12, 21)]
+    assert periods[2].ranges[0].end == time(16, 30)
+    # 12/21〜03/20 は年をまたぐ。冬の日がこの区分に入る
+    assert periods[2].season is not None
+    assert periods[2].season.contains(date(2027, 1, 5)) is True
+    assert periods[0].season is not None
+    assert periods[0].season.contains(date(2027, 1, 5)) is False
+
+
+def test_a_season_heading_on_its_own_line_applies_to_the_rows_below() -> None:
+    """表では季節が行見出しになり、時間は次の行に来る。対応を取り違えると冬の時間を夏に出す。"""
+    text = "\n".join(["区分 営業時間 始発 最終便", "03/21~10/20", "8:30~17:00", "8:36", "17:00"])
+    periods, note = parse_opening_hours(text)
+    assert note is None
+    assert periods is not None
+    assert periods[0].season is not None
+    assert (periods[0].season.start_month, periods[0].season.end_month) == (3, 10)
+    assert periods[0].ranges[0].start == time(8, 30)
+
+
+def test_a_time_without_a_season_heading_stays_unconditional() -> None:
+    """見出しを持ち越すのは季節だけの断片が先に来たときに限る。"""
+    periods, _ = parse_opening_hours("9:00〜17:00")
+    assert periods is not None
+    assert periods[0].season is None
+
+
+def test_a_lone_clock_is_not_a_range() -> None:
+    assert parse_opening_hours("始発 8:36") == (None, "no_time_range")

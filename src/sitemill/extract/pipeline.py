@@ -8,12 +8,27 @@ from typing import Any
 
 from sitemill.diff.normalize import page_text, squash
 from sitemill.extract.llm.base import LLMProvider, LLMResult
-from sitemill.extract.quotes import quote_in_source, verbatim_overlap
+from sitemill.extract.quotes import verbatim_overlap, verify_quote
 from sitemill.extract.spec import ExtractedItem, ExtractionSpec
 from sitemill.metrics.extraction import ExtractionMetrics
 from sitemill.models import FieldStatus, FieldValue
+from sitemill.models.schedule import HoursPeriod
+from sitemill.parse.jsonld import opening_hours
 
 log = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class StructuredHours:
+    """ページが機械可読の形で宣言している営業時間（JSON-LD）。
+
+    本文に書かれていない施設が JSON-LD だけに書いていることがある。`quote` は根拠として
+    表示する原文（ここでは JSON-LD の該当部分）。
+    """
+
+    periods: list[HoursPeriod]
+    quote: str
+    note: str
 
 
 @dataclass
@@ -22,6 +37,8 @@ class PageInput:
     kind: str
     text: str
     truncated: bool = False
+    # 本文（text）には入らない機械可読の宣言。LLM には渡さず、決定的に値にする
+    structured_hours: StructuredHours | None = None
 
 
 def prepare_input(
@@ -31,7 +48,15 @@ def prepare_input(
     truncated = len(text) > max_chars
     if truncated:
         text = text[:max_chars]
-    return PageInput(url=url, kind=kind, text=text, truncated=truncated)
+    periods, quote, note = opening_hours(html)
+    structured = (
+        StructuredHours(periods=periods, quote=quote, note=note or "jsonld")
+        if periods and quote
+        else None
+    )
+    return PageInput(
+        url=url, kind=kind, text=text, truncated=truncated, structured_hours=structured
+    )
 
 
 def _as_str(v: Any) -> str | None:
@@ -49,13 +74,16 @@ def apply_item(spec: ExtractionSpec, raw: dict[str, Any], source_squashed: str) 
         if quote is None:
             item.fields[qf.target] = FieldValue(status=FieldStatus.not_found)
             continue
-        if not quote_in_source(quote, source_squashed):
+        found, join_note = verify_quote(quote, source_squashed)
+        if not found:
             item.fields[qf.target] = FieldValue(
                 quote=quote, status=FieldStatus.quote_not_in_source, note="quote_not_in_source"
             )
             continue
         if qf.parser is None:
-            item.fields[qf.target] = FieldValue(value=quote, quote=quote, status=FieldStatus.parsed)
+            item.fields[qf.target] = FieldValue(
+                value=quote, quote=quote, status=FieldStatus.parsed, note=join_note
+            )
             continue
         value, note = qf.parser(quote)
         if value is None:
@@ -64,7 +92,7 @@ def apply_item(spec: ExtractionSpec, raw: dict[str, Any], source_squashed: str) 
             )
         else:
             item.fields[qf.target] = FieldValue(
-                value=value, quote=quote, status=FieldStatus.parsed, note=note
+                value=value, quote=quote, status=FieldStatus.parsed, note=note or join_note
             )
 
     for name in spec.free_text_fields:
@@ -135,6 +163,7 @@ def extract_page(
         temperature=temperature,
     )
     items, metrics = apply_spec(spec, result.data, page.text)
+    fill_structured_hours(spec, page, items)
     if page.truncated:
         metrics.truncated_pages = 1
     log.info(
@@ -146,3 +175,32 @@ def extract_page(
         result.cached,
     )
     return PageExtraction(items=items, metrics=metrics, llm=result)
+
+
+def fill_structured_hours(
+    spec: ExtractionSpec, page: PageInput, items: list[ExtractedItem]
+) -> None:
+    """本文から営業時間が取れなかったとき、JSON-LD の宣言で埋める。
+
+    本文の引用のほうが季節別・最終入館まで書かれていて情報が多いので、**本文が取れていれば
+    そちらを使う**。JSON-LD は本文に書いていない施設のための最後の一手である。
+
+    LLM を通さない。JSON-LD は施設自身が書いた機械可読の宣言なので、読み取りは決定的に行う
+    （ADR 0004 の「数値は決定的パーサだけが決める」に沿う）。
+    """
+    target = spec.structured_hours_target
+    if target is None or page.structured_hours is None or not items:
+        return
+    item = items[0]  # 施設ページは 1 ページ 1 件（告知ページはこの設定を持たない）
+    current = item.fields.get(target)
+    if current is not None and current.ok:
+        return
+    structured = page.structured_hours
+    item.fields[target] = FieldValue(
+        value=structured.periods,
+        quote=structured.quote,
+        status=FieldStatus.parsed,
+        note=structured.note,
+    )
+    item.flags.append(f"{target}_from_jsonld")
+    log.info("%s: 営業時間を JSON-LD から取った（%s）", page.url, structured.note)

@@ -36,6 +36,11 @@ _SEASON = re.compile(
     rf"(?P<sm>\d{{1,2}})\s*月\s*(?:(?P<sd>\d{{1,2}})\s*日)?\s*{DASH}\s*"
     rf"(?P<em>\d{{1,2}})\s*月\s*(?:(?P<ed>\d{{1,2}})\s*日)?"
 )
+# 「03/21~10/20」の形の季節区分。`_SEGMENT_SPLIT` が「/」で切ってしまうため、
+# 切る前に「3月21日〜10月20日」に書き換える（寒霞渓のロープウェイの営業時間表がこの形）
+_SLASH_SPAN = re.compile(
+    rf"(?<![\d:])(\d{{1,2}})\s*/\s*(\d{{1,2}})\s*{DASH}\s*(\d{{1,2}})\s*/\s*(\d{{1,2}})(?![\d:])"
+)
 # 原文が「時間の指定が無い」と明示している書き方。値として持つ（unknown にしない）
 _ALWAYS_OPEN = re.compile(r"24\s*時間|終日|常時開放|常時開園|入[園館場]自由|見学自由|随時")
 
@@ -94,6 +99,15 @@ def parse_time_ranges(text: str) -> list[TimeRange]:
     return ranges
 
 
+def _slash_spans(text: str) -> str:
+    """「03/21~10/20」を「3月21日〜10月20日」に書き換え、その前を断片の境目にする。
+
+    境目を入れるのは、表の各行が「季節 時間帯」の対になっているためである。境目が無いと
+    4 季節ぶんの時刻が 1 つの断片に混ざり、どの時間がどの季節のものか分からなくなる。
+    """
+    return _SLASH_SPAN.sub(lambda m: f"\n{m[1]}月{m[2]}日〜{m[3]}月{m[4]}日 ", text)
+
+
 def _season(text: str) -> tuple[AnnualSpan | None, str]:
     """季節の前置き（「3月〜9月」）を取り出し、残りの文字列を返す。"""
     m = _SEASON.search(text)
@@ -120,13 +134,17 @@ def parse_opening_hours(quote: str) -> tuple[list[HoursPeriod] | None, str | Non
     """
     if not quote or not quote.strip():
         return None, "no_text"
-    text = normalize_text(quote)
+    text = _slash_spans(normalize_text(quote))
     if _ALWAYS_OPEN.search(text):
         # 「入園自由」「24時間」。時間帯は無いが**開いていることは分かる**ので値にする。
         # 時間が書かれていないだけの施設（unknown）と区別する
         return [HoursPeriod(always_open=True, label=text[:60])], "always_open"
 
     periods: list[HoursPeriod] = []
+    # 表では季節の区分が行の見出しとして単独の行に立ち、時間帯は次の行に来る。
+    # 見出しだけの断片は「ここから先はこの季節」として覚えておく
+    #   03/21~10/20 / 8:30~17:00 / 8:36 / 17:00 / 10/21~11/30 / 8:00~17:00 …
+    pending_season: AnnualSpan | None = None
     for segment in _SEGMENT_SPLIT.split(text):
         segment = segment.strip()
         if not segment:
@@ -134,7 +152,11 @@ def parse_opening_hours(quote: str) -> tuple[list[HoursPeriod] | None, str | Non
         season, rest = _season(segment)
         ranges = parse_time_ranges(rest)
         if not ranges:
+            if season is not None:
+                pending_season = season
             continue
+        if season is None:
+            season = pending_season
         days = parse_day_selector(rest) or DaySelector()
         periods.append(HoursPeriod(ranges=ranges, days=days, season=season, label=segment or None))
     if not periods:
