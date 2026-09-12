@@ -12,8 +12,20 @@ _SKIP_PREFIX = ("mailto:", "tel:", "javascript:", "#", "data:")
 
 @dataclass(frozen=True)
 class Link:
+    """1 つの URL へのリンク。
+
+    `labels` は同じ URL を指すアンカーの文字列すべて（出現順）。断片（#...）を落として
+    重複排除すると 1 件に畳まれるが、「どのラベルで張られているか」は目的のページを
+    見つける手がかりなので捨てない。`text` は最初の空でないラベル。
+    """
+
     url: str
     text: str
+    labels: tuple[str, ...] = ()
+
+    def labelled(self) -> tuple[str, ...]:
+        """空でないラベルの並び。`text` しか無い呼び出し側との橋渡し。"""
+        return self.labels or ((self.text,) if self.text else ())
 
 
 @dataclass(frozen=True)
@@ -33,25 +45,6 @@ MAX_CONTEXT = 120
 MAX_HEADING = 80
 
 
-def extract_links(html: str, base_url: str) -> list[Link]:
-    tree = HTMLParser(html)
-    base = tree.css_first("base[href]")
-    if base is not None and base.attributes.get("href"):
-        base_url = urljoin(base_url, base.attributes["href"])
-    out: list[Link] = []
-    seen: set[str] = set()
-    for a in tree.css("a[href]"):
-        href = (a.attributes.get("href") or "").strip()
-        if not href or href.lower().startswith(_SKIP_PREFIX):
-            continue
-        url = urldefrag(urljoin(base_url, href))[0]
-        if not url.startswith(("http://", "https://")) or url in seen:
-            continue
-        seen.add(url)
-        out.append(Link(url=url, text=a.text(separator=" ", strip=True)))
-    return out
-
-
 def _anchor_text(a: Node) -> str:
     text = a.text(separator=" ", strip=True)
     if text:
@@ -62,6 +55,40 @@ def _anchor_text(a: Node) -> str:
         if alt:
             return alt
     return (a.attributes.get("title") or "").strip()
+
+
+def extract_links(html: str, base_url: str) -> list[Link]:
+    """リンクを重複なく返す。同じ URL のラベルは**すべて** `labels` に残す。
+
+    断片（#...）を落として重複排除するので、1 つのページに「#contents1331 開園日・開園時間」
+    「#contents1332 入園料」「各種サービス」のような複数のリンクがあると 1 件に畳まれる。
+    どれか 1 つを選ぶ規則（先に来たもの・長いもの）はどれも取りこぼす。実例では
+    「各種サービス(コインロッカー、車椅子)」が最長で、探していた「開園日・開園時間」が消えた。
+    選ばずに全部渡し、どのラベルで探すかは呼び出し側に決めさせる。
+    """
+    tree = HTMLParser(html)
+    base = tree.css_first("base[href]")
+    if base is not None and base.attributes.get("href"):
+        base_url = urljoin(base_url, base.attributes["href"])
+    found: dict[str, list[str]] = {}
+    order: list[str] = []
+    for a in tree.css("a[href]"):
+        href = (a.attributes.get("href") or "").strip()
+        if not href or href.lower().startswith(_SKIP_PREFIX):
+            continue
+        url = urldefrag(urljoin(base_url, href))[0]
+        if not url.startswith(("http://", "https://")):
+            continue
+        text = _anchor_text(a)
+        if url not in found:
+            found[url] = []
+            order.append(url)
+        if text and text not in found[url]:
+            found[url].append(text)
+    return [
+        Link(url=url, text=(found[url][0] if found[url] else ""), labels=tuple(found[url]))
+        for url in order
+    ]
 
 
 def _row_context(a: Node, max_context: int) -> str:

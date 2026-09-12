@@ -61,3 +61,57 @@ def test_base_href_and_relative_urls() -> None:
     html = '<base href="https://x.example/sub/"><a href="a.html">A</a>'
     rows = extract_link_rows(html, "https://y.example/")
     assert rows[0].url == "https://x.example/sub/a.html"
+
+
+def test_duplicate_urls_keep_every_label() -> None:
+    """同じページに複数のラベルで張られているとき、どれも捨てない。
+
+    栗林公園の実例: 案内ページには「開園日・開園時間」「入園料」「各種サービス(コインロッカー、
+    車椅子)」が別々の断片リンクで張られている。1 つだけ選ぶ規則はどれも取りこぼす
+    （最長を選ぶと「各種サービス…」が勝ち、探していた開園時間が消えた）。
+    """
+    from sitemill.fetch.links import extract_links
+
+    html = """<html><body>
+    <a href="/guide"><img src="/x.png" alt=""></a>
+    <ul>
+      <li><a href="/guide#c1">開園日・開園時間</a></li>
+      <li><a href="/guide#c2">入園料</a></li>
+      <li><a href="/guide#c3">各種サービス(コインロッカー、車椅子)</a></li>
+    </ul>
+    </body></html>"""
+    links = extract_links(html, "https://example.jp/spot/")
+    assert [lk.url for lk in links] == ["https://example.jp/guide"]
+    assert links[0].labels == ("開園日・開園時間", "入園料", "各種サービス(コインロッカー、車椅子)")
+    assert links[0].text == "開園日・開園時間"
+    assert "開園日・開園時間" in links[0].labelled()
+
+
+def test_duplicate_urls_keep_the_descriptive_label() -> None:
+    """断片つきリンクを畳むとき、説明的なラベルを残す。
+
+    栗林公園の実例: 同じ案内ページへ画像リンク（アンカー文字列が空）と
+    「開園日・開園時間」「入園料」のリンクが並ぶ。先に来た画像リンクを残すと、
+    目的のページを見つける手がかり（ラベル）が消えて「時間が取れない」ことになる。
+    """
+    from sitemill.fetch.links import extract_links
+
+    html = """<html><body>
+    <a href="/guide"><img src="/x.png" alt=""></a>
+    <ul>
+      <li><a href="/guide#contents1331">開園日・開園時間</a></li>
+      <li><a href="/guide#contents1332">入園料</a></li>
+    </ul>
+    </body></html>"""
+    links = extract_links(html, "https://example.jp/spot/")
+    assert [lk.url for lk in links] == ["https://example.jp/guide"]
+    assert links[0].text == "開園日・開園時間"
+    assert links[0].labelled() == ("開園日・開園時間", "入園料")
+
+
+def test_image_alt_is_used_when_the_anchor_has_no_text() -> None:
+    from sitemill.fetch.links import extract_links
+
+    html = '<a href="/guide"><img src="/x.png" alt="利用案内"></a>'
+    links = extract_links(html, "https://example.jp/")
+    assert links[0].text == "利用案内"

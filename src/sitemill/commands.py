@@ -133,7 +133,14 @@ def cmd_crawl(
         for src in crawlable:
             ok, interval, why = source_due(src.id, state, now=now, policy=policy)
             del interval
-            if ok:
+            # まだ 1 度も取っていない seed があるなら、間隔に関わらず取りに行く。
+            # seed を足した直後に「まだ期日でない」で見送ると、新しいページが最長 7 日間
+            # 取得されず、その間ずっと情報が欠けたままになる
+            unseen = [p.url for p in src.pages if state.get(p.url) is None]
+            if ok or unseen:
+                if unseen and not ok:
+                    report.bump("crawl", "new_seeds", len(unseen))
+                    log.info("%s: 未取得の seed が %d 件あるので取りに行く", src.id, len(unseen))
                 targets.append((src, None))
                 continue
             if daily_kinds and any(str(p.kind) in daily_kinds for p in src.pages):

@@ -146,3 +146,26 @@ def test_a_due_source_still_fetches_every_page(site: None, tmp_path: Path) -> No
         str(call.request.url) for call in respx.calls if "robots" not in str(call.request.url)
     }
     assert fetched == {HOURS_URL, NOTICE_URL}
+
+
+@respx.mock
+def test_a_new_seed_is_fetched_even_when_the_source_is_not_due(site: None, tmp_path: Path) -> None:
+    """seed を足した直後に「期日でない」で見送ると、最長 7 日間その情報が欠ける。"""
+    rt = _workspace(tmp_path, always_daily="")
+    state = CrawlState()
+    # 開館時間のページだけ「昨日取得・変化は 60 日前」にして、告知ページは未取得のままにする
+    state.urls[HOURS_URL] = UrlState(
+        url=HOURS_URL,
+        source_id="spot",
+        kind="spot_hours",
+        fetched_at=NOW - timedelta(days=1),
+        changed_at=NOW - timedelta(days=60),
+        content_hash="x",
+    )
+    state.save(rt.state_path)
+    report = commands.cmd_crawl(rt)
+    assert report.stages["crawl"].get("new_seeds") == 1
+    fetched = {
+        str(call.request.url) for call in respx.calls if "robots" not in str(call.request.url)
+    }
+    assert NOTICE_URL in fetched
