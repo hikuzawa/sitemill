@@ -152,3 +152,13 @@ def test_page_kind_typos_are_rejected() -> None:
     for bad in ("Listing Index", "listing-index", "1st", ""):
         with pytest.raises(ValidationError):
             SeedPage(url="https://example.com/", kind=bad)
+
+
+def test_pending_is_a_third_state_and_never_crawled() -> None:
+    """運営主体を判定できていないものは pending。link_only と混ぜない（ADR 0011）。"""
+    pending = _source(policy=CrawlPolicy.pending, operator_kind=OperatorKind.unknown)
+    assert not pending.crawlable
+    assert pending.policy is not CrawlPolicy.link_only
+    # 根拠が無くても pending なら作れる（判定できていないことを記録するための状態）
+    assert _source(policy=CrawlPolicy.pending, operator_evidence=None, pages=[]) is not None
+    check_crawl_gate(_Service(), [pending])  # 巡回しないのでゲートには掛からない

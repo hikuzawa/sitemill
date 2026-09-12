@@ -18,11 +18,30 @@ _ALLOW: tuple[tuple[re.Pattern[str], LicenseId], ...] = (
     (re.compile(r"(?<![\w-])CC[\s\-]?BY[\s\-]?4\.0(?![\w.-])", re.I), LicenseId.CC_BY_4_0),
     (re.compile(r"クリエイティブ・?コモンズ[・\s]*表示\s*4\.0"), LicenseId.CC_BY_4_0),
     (re.compile(r"(?<![\w-])CC0(?:\s*1\.0)?(?![\w.-])"), LicenseId.CC0_1_0),
+    # 継承義務のないもの（ADR 0005 追記）。URL の一致を先に見て、緩い文字列は最後に置く
+    (re.compile(r"creativecommons\.org/licenses/by/2\.5", re.I), LicenseId.CC_BY_2_5),
+    (re.compile(r"creativecommons\.org/licenses/by/2\.0", re.I), LicenseId.CC_BY_2_0),
+    (re.compile(r"creativecommons\.org/publicdomain/mark/1\.0", re.I), LicenseId.PD_MARK_1_0),
+    (re.compile(r"(?<![\w-])CC[\s\-]?BY[\s\-]?3\.0(?![\w.-])", re.I), LicenseId.CC_BY_3_0),
+    (
+        re.compile(
+            r"public\s+domain|パブリックドメイン|(?<![\w-])PD-(?:old|Japan|self|art|scan|US)",
+            re.I,
+        ),
+        LicenseId.PUBLIC_DOMAIN,
+    ),
 )
 _DENY = (
     re.compile(r"creativecommons\.org/licenses/by-(nc|nd|sa)", re.I),
     re.compile(r"(?<![\w-])CC[\s\-]?BY[\s\-]?(NC|ND|SA)", re.I),
     re.compile(r"非営利|改変禁止|継承\s*4\.0|転載を?禁|無断転載|All Rights Reserved", re.I),
+    # パブリックドメインを否定する書き方。「米国ではパブリックドメインだが日本では保護期間内」の
+    # ような注記がある画像を、緩い文字列一致で拾わないため（ADR 0005 追記）
+    re.compile(
+        r"not\s+(?:be\s+)?in\s+the\s+public\s+domain|may\s+not\s+be\s+in\s+the\s+public"
+        r"|パブリックドメインではない|保護期間(?:内|満了していない)|著作権が存続",
+        re.I,
+    ),
 )
 
 

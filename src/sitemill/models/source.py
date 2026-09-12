@@ -12,8 +12,16 @@ from sitemill.models.license import LicenseVerdict
 
 
 class CrawlPolicy(StrEnum):
+    """巡回方針。`pending` は「運営主体を判定できていない」状態（ADR 0011）。
+
+    `pending` は crawl でも link_only でもない第 3 の状態として持つ。link_only にしてしまうと
+    「判定した結果リンクだけにした」ものと「まだ判定できていない」ものが混ざり、レビューに
+    回すべき案件が見えなくなる。巡回しないことは `crawlable` が False であることで担保される。
+    """
+
     crawl = "crawl"
     link_only = "link_only"
+    pending = "pending"
 
 
 class OperatorKind(StrEnum):

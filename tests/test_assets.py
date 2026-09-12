@@ -10,7 +10,13 @@ import pytest
 import respx
 
 from sitemill.assets import Asset, AssetError, AssetPolicy, AssetStore, fetch_asset
-from sitemill.assets.commons import category_files, read_file_page, thumbnail_url
+from sitemill.assets.commons import (
+    category_files,
+    category_name,
+    find_category_links,
+    read_file_page,
+    thumbnail_url,
+)
 from sitemill.assets.terms import read_terms
 from sitemill.build.preflight import check_images
 from sitemill.fetch.client import PoliteClient
@@ -197,12 +203,61 @@ def test_cc0_file_is_adopted() -> None:
     assert page.verdict.allowed and page.verdict.license_id is LicenseId.CC0_1_0
 
 
-def test_public_domain_tag_is_not_on_the_whitelist() -> None:
-    """PD-Japan はホワイトリストに無いので不採用。広げるかは ADR で決める（S3 の報告）。"""
+def test_public_domain_tag_is_adopted() -> None:
+    """継承義務が無いので受け入れる（ADR 0005 追記、2026-09-12 の事業側の判断）。"""
     page = read_file_page(
         FILE_PAGE.format(license=PD_OLD), "https://commons.wikimedia.org/wiki/File:X.jpg"
     )
+    assert page.verdict.allowed and page.verdict.license_id is LicenseId.PUBLIC_DOMAIN
+
+
+def test_public_domain_only_in_one_country_is_rejected() -> None:
+    """「米国ではパブリックドメインだが日本では保護期間内」を緩い一致で拾わない。"""
+    box = (
+        "<p>This work is in the public domain in the United States, but it may "
+        "not be in the public domain in other jurisdictions.</p>"
+    )
+    page = read_file_page(
+        FILE_PAGE.format(license=box), "https://commons.wikimedia.org/wiki/File:X.jpg"
+    )
     assert not page.verdict.allowed
+
+
+def test_older_cc_by_versions_are_adopted() -> None:
+    for box, expected in (
+        (
+            '<a href="https://creativecommons.org/licenses/by/2.5/">CC BY 2.5</a>',
+            LicenseId.CC_BY_2_5,
+        ),
+        (
+            '<a href="https://creativecommons.org/licenses/by/2.0/">CC BY 2.0</a>',
+            LicenseId.CC_BY_2_0,
+        ),
+        (
+            '<a href="https://creativecommons.org/licenses/by/3.0/">CC BY 3.0</a>',
+            LicenseId.CC_BY_3_0,
+        ),
+    ):
+        page = read_file_page(
+            FILE_PAGE.format(license=box), "https://commons.wikimedia.org/wiki/File:X.jpg"
+        )
+        assert page.verdict.allowed and page.verdict.license_id is expected, box
+
+
+def test_public_domain_mark_is_adopted() -> None:
+    box = '<a href="https://creativecommons.org/publicdomain/mark/1.0/">PD Mark</a>'
+    page = read_file_page(
+        FILE_PAGE.format(license=box), "https://commons.wikimedia.org/wiki/File:X.jpg"
+    )
+    assert page.verdict.allowed and page.verdict.license_id is LicenseId.PD_MARK_1_0
+
+
+def test_every_whitelisted_license_is_free_of_share_alike() -> None:
+    """継承つきを足すとサイトに取り消せない義務が生じる。ホワイトリストの不変条件として固定する。"""
+    from sitemill.models.license import NO_SHARE_ALIKE, WHITELIST
+
+    assert WHITELIST == NO_SHARE_ALIKE
+    assert all("SA" not in lic.value.upper().replace("-", "") for lic in WHITELIST)
 
 
 MULTI_LICENSE = """<html><body>
@@ -426,3 +481,27 @@ def test_credit_falls_back_to_the_stored_text_when_the_author_is_unknown(tmp_pat
     )
     html = macros.photo_figure(asset, "ja", "/static/assets/abc123.jpg")
     assert "出典: 香川県（CC BY 4.0）" in html
+
+
+# --- カテゴリを推測せず辿る -------------------------------------------------
+
+WIKIPEDIA_ARTICLE = """<html><body>
+<h1>栗林公園</h1>
+<div class="sisterproject">
+<a href="https://commons.wikimedia.org/wiki/Category:Ritsurin_Garden">ウィキメディア・コモンズ</a>
+</div>
+<a href="//commons.wikimedia.org/wiki/Category:Ritsurin_Garden?uselang=ja">同じカテゴリ</a>
+<a href="https://commons.wikimedia.org/wiki/File:X.jpg">ファイル</a>
+<a href="https://ja.wikipedia.org/wiki/高松市">高松市</a>
+</body></html>"""
+
+
+def test_category_links_are_followed_not_guessed() -> None:
+    """カテゴリ名は推測しない。ページから実際に張られているリンクだけを辿る。"""
+    links = find_category_links(WIKIPEDIA_ARTICLE)
+    assert links == ["https://commons.wikimedia.org/wiki/Category:Ritsurin_Garden"]
+    assert category_name(links[0]) == "Ritsurin Garden"
+
+
+def test_no_category_link_means_no_category() -> None:
+    assert find_category_links("<html><body><p>リンクなし</p></body></html>") == []

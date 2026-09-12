@@ -184,6 +184,50 @@ def category_files(html: str, *, base_url: str = COMMONS, limit: int = 40) -> li
     return out
 
 
+_CATEGORY_LINK = re.compile(
+    r"^(?:https?:)?//commons\.wikimedia\.org/wiki/"
+    r"(?:Category|%E3%82%AB%E3%83%86%E3%82%B4%E3%83%AA):",
+    re.I,
+)
+
+
+def find_category_links(html: str, *, limit: int = 10) -> list[str]:
+    """ページから Commons のカテゴリへのリンクを集める。
+
+    カテゴリ名を**推測しない**ために使う。施設の公式サイトや Wikipedia の記事から
+    実際に張られているリンクだけを辿る。見つからなければ「カテゴリなし」として扱う。
+    """
+    out: list[str] = []
+    seen: set[str] = set()
+    for node in HTMLParser(html).css("a[href]"):
+        href = (node.attributes.get("href") or "").strip()
+        if not _CATEGORY_LINK.match(href):
+            continue
+        url = ("https:" + href) if href.startswith("//") else href
+        url = strip_query(url)
+        if url in seen:
+            continue
+        seen.add(url)
+        out.append(url)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def category_name(category_url: str) -> str:
+    """カテゴリの URL から名前を取り出す（`Category:` の後ろ、下線は空白に戻す）。"""
+    tail = unquote(category_url.rstrip("/").rsplit("/", 1)[-1])
+    return tail.split(":", 1)[-1].replace("_", " ")
+
+
+def fetch_category_links(client: Any, page_url: str) -> tuple[list[str], str | None]:
+    """ページを取得して、そこから張られている Commons のカテゴリを返す。"""
+    res = client.get(page_url)
+    if not res.ok:
+        return [], f"取得できない（status={res.status} {res.error or ''}）"
+    return find_category_links(res.text), None
+
+
 def file_title(page_url: str) -> str:
     return unquote(page_url.rsplit("/", 1)[-1]).split(":", 1)[-1].replace("_", " ")
 
