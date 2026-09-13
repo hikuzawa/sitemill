@@ -31,6 +31,8 @@ class Secrets(BaseSettings):
     cloudflare_api_token: str | None = None
     cloudflare_account_id: str | None = None
     cf_web_analytics_token: str | None = None
+    # Search Console のサービスアカウントの鍵（JSON を base64 にした 1 行。ADR 0023）
+    google_search_console_key: str | None = None
     google_site_verification: str | None = None
     sitemill_llm_provider: str | None = None
 
@@ -113,6 +115,21 @@ class AnalyticsConfig(BaseModel):
     provider: str = "cloudflare"
 
 
+class SearchConsoleConfig(BaseModel):
+    """Search Console の取り込み（ADR 0023）。
+
+    `property` は API に渡す識別子。ドメインプロパティなら `sc-domain:example.com`、
+    URL プレフィックスなら `https://example.com/`。**空なら base_url のホストから
+    `sc-domain:` の形を組み立てる**（種類が違えば API が 403 を返し、何を書けばよいか表示する）。
+    """
+
+    property: str = ""
+    # 1 日に URL 検査を回す件数。Google の割り当ては 1 プロパティ 2,000 件/日
+    inspect_per_day: int = 200
+    # 検索パフォーマンスを取り直す日数（Search Console は 2〜3 日遅れて確定する）
+    refresh_days: int = 5
+
+
 class SiteConfig(BaseModel):
     id: str
     name: str
@@ -127,6 +144,7 @@ class SiteConfig(BaseModel):
     crawl: CrawlConfig = Field(default_factory=CrawlConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
     analytics: AnalyticsConfig = Field(default_factory=AnalyticsConfig)
+    search_console: SearchConsoleConfig = Field(default_factory=SearchConsoleConfig)
 
     @field_validator("base_url")
     @classmethod

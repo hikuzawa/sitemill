@@ -10,6 +10,8 @@
   `embeds/` 地図・SNS 埋め込み、`i18n/` 多言語（ロケール・文言カタログ・ロケール別書式）、
   `clock.py` 日本時間、`jpcal/` 祝日、`openstatus/` 「その日開いているか」の判定、
   `deploy/` デプロイ、`metrics/` 実行レポートと抽出精度、`store/` JSON/JSONL の永続化
+- `search/` Search Console の取り込みと集計（ADR 0023）。`sitemill search fetch|report|properties`。
+  鍵は `.env` の `GOOGLE_SEARCH_CONSOLE_KEY`（サービスアカウントの JSON を base64 にした 1 行）
 - `affiliate/` ASP 案件の選定（貼り付け→構造化→判定→申請順、ADR 0019）。物差しは `profiles/` の雛形を
   サービス側にコピーして渡す
 - `docs/adr/` 設計判断。方針を変えるときは新しい ADR を足す（既存は上書きしない）
@@ -37,6 +39,8 @@
 - 開閉の判定は open / closed / unknown の 3 値で、必ず根拠コードと引用を返す（ADR 0018）。材料が無い・矛盾する・原文から決められないときは unknown にする。推測で埋めない
 - 祝日は一次データ（内閣府 CSV）を優先し、取得できなくても規則の計算で答える。外部ファイルの取得成功を判定の前提にしない
 - 巡回は robots.txt を守り、ホストごとに間隔を空ける。取得した生 HTML はコミットしない（ADR 0002, 0003）
+- Search Console の数字は 2〜3 日遅れて確定する。取り込みは日付ごとに**上書き**する（追記すると二重になる）。
+  インデックス数は URL 検査で数える。`sitemaps` API の `indexed` は Google が更新しておらず常に 0（ADR 0023）
 - 秘密情報はコードにも設定ファイルにも書かない。環境変数と .env のみ。値が `op://` のままなら起動時に止める
 - `.env.example` にはプレースホルダー（空の値）だけを置く。値を書いた時点でコミット前フックが止める
 - コミット前フックは `.githooks/pre-commit`（`uv run sitemill scan-secrets --staged`、gitleaks があれば併用）。clone 後に一度 `git config core.hooksPath .githooks` で有効化する。CI でも全履歴を `scan-secrets --history` で走査する

@@ -398,5 +398,103 @@ def _pick(result, pick: str):
     return hits[0]
 
 
+search_app = typer.Typer(
+    help="Search Console の取り込みと集計（ADR 0023）",
+    no_args_is_help=True,
+)
+app.add_typer(search_app, name="search")
+
+
+def _console(rt: commands.Runtime):
+    """プロパティを決めて API の入口を作る。鍵が無ければ何を書くかを出して止める。"""
+    from sitemill.search import SearchConsole, load_service_account
+
+    info = load_service_account(rt.ws.secrets.google_search_console_key)
+    prop = rt.ws.site.search_console.property
+    if not prop:
+        host = rt.ws.site.base_url.split("//", 1)[-1].split("/", 1)[0]
+        prop = f"sc-domain:{host}"
+    return SearchConsole(info, prop)
+
+
+def _search_store(rt: commands.Runtime):
+    from sitemill.search import SearchStore
+
+    return SearchStore(rt.ws.data_dir)
+
+
+def _site_urls(rt: commands.Runtime) -> list[str]:
+    from sitemill.search import sitemap_urls
+
+    return sitemap_urls(rt.ws.dist_dir, rt.ws.site.base_url)
+
+
+@search_app.command("properties")
+def search_properties(root: RootOpt = None) -> None:
+    """このサービスアカウントが見られるプロパティを出す（疎通の確認用）。"""
+    rt = _runtime(root)
+    with _console(rt) as console:
+        typer.echo(f"サービスアカウント: {console.account}")
+        for site, permission in console.properties():
+            mark = "← 設定中" if site == console.property_url else ""
+            typer.echo(f"  {site}  ({permission}) {mark}")
+
+
+@search_app.command("fetch")
+def search_fetch(
+    root: RootOpt = None,
+    days: Annotated[
+        int | None,
+        typer.Option("--days", help="さかのぼる日数（既定は site.toml の refresh_days）"),
+    ] = None,
+    inspect: Annotated[
+        int | None, typer.Option("--inspect", help="URL 検査を回す件数（0 で行わない）")
+    ] = None,
+) -> None:
+    """検索パフォーマンス・サイトマップ・URL 検査を取り込む。
+
+    日次のパイプラインから呼ぶ。直近の数日を取り直すので、遅れて確定した数字も後から埋まる。
+    """
+    from sitemill.search import fetch_performance, fetch_sitemaps, inspect_urls
+
+    rt = _runtime(root)
+    cfg = rt.ws.site.search_console
+    store = _search_store(rt)
+    with _console(rt) as console:
+        typer.echo(f"プロパティ: {console.property_url}")
+        result = fetch_performance(console, store, days=days or cfg.refresh_days)
+        got = "／".join(f"{k} {v:,} 行" for k, v in result.rows.items())
+        typer.echo(f"検索パフォーマンス（{result.start} 〜 {result.end}）: {got}")
+        for grain in result.truncated:
+            typer.echo(f"  ! {grain} は上限で打ち切られた（取りきれていない）", err=True)
+        rows = fetch_sitemaps(console, store)
+        submitted = sum(
+            int(c.get("submitted", 0)) for r in rows for c in r.get("contents", [])
+        )
+        typer.echo(f"サイトマップ: {len(rows)} 本／送信 {submitted:,} URL")
+        limit = cfg.inspect_per_day if inspect is None else inspect
+        if limit > 0:
+            urls = _site_urls(rt)
+            done = inspect_urls(console, store, urls, limit=limit)
+            states = "／".join(f"{k} {v}" for k, v in done.states.items()) or "なし"
+            typer.echo(f"URL 検査: {len(done.checked)} 件（{states}）")
+            for line in done.failed[:5]:
+                typer.echo(f"  ! {line}", err=True)
+        typer.echo(f"（{console.request_count} リクエスト）")
+
+
+@search_app.command("report")
+def search_report(
+    root: RootOpt = None,
+    days: Annotated[int, typer.Option("--days", help="集計する日数")] = 7,
+) -> None:
+    """週次レポートに差し込む節を Markdown で出す。データが 0 でも読める形で出る。"""
+    from sitemill.search import markdown, summarise
+
+    rt = _runtime(root)
+    summary = summarise(_search_store(rt), site_urls=_site_urls(rt), days=days)
+    typer.echo(markdown(summary))
+
+
 if __name__ == "__main__":  # pragma: no cover
     app()
