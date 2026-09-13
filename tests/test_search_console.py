@@ -235,3 +235,17 @@ def test_the_report_leads_with_how_indexing_is_going(tmp_path: Path) -> None:
     assert "サイトマップ再取得待ち" in text
     # `indexed` は Google が返さなくなった項目なので、インデックス数として出さない
     assert "5** URL" in text and "0 ページが登録済み" not in text
+
+
+def test_the_report_dates_itself_in_japan_time(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """UTC の実行機で走るので、素の today() で日付を取ると JST の朝に前日になる（ADR 0018）。
+
+    実際、週次の Issue が「2026-09-13 時点」と出た（走ったのは JST の 9/14 朝）。
+    """
+    import sitemill.search.report as module
+
+    monkeypatch.setattr(module, "jst_today", lambda: date(2026, 9, 14))
+    summary = summarise(SearchStore(tmp_path), days=7)
+    assert summary.end == date(2026, 9, 14)

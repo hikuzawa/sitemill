@@ -21,6 +21,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 
+from sitemill.clock import jst_today
 from sitemill.search.store import Fact, SearchStore
 
 # 「表示は多いが CTR が低い」とみなす境目
@@ -126,7 +127,8 @@ def summarise(
     days: int = 7,
     today: date | None = None,
 ) -> Summary:
-    end = today or date.today()
+    # 日付は必ず日本時間で決める（ADR 0018）。実行環境は UTC なので、JST の朝に前日になる
+    end = today or jst_today()
     start = end - timedelta(days=days - 1)
     prev_start = start - timedelta(days=days)
     pages = store.read("page", since=prev_start - timedelta(days=1))
