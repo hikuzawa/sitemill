@@ -43,6 +43,9 @@ _FIELD_ALIASES: dict[str, tuple[str, ...]] = {
         "基本報酬",
         "報酬",
         "単価",
+        # もしもアフィリエイトは報酬の見出しが「成果」だけ。単独では「成果発生メール許可」の
+        # ような行と紛れるので、値が金額の形のときだけ採る（`_STRICT_ALIASES`）
+        "成果",
     ),
     "condition": (
         "成果発生条件",
@@ -54,7 +57,15 @@ _FIELD_ALIASES: dict[str, tuple[str, ...]] = {
     ),
     "approval_rate": ("成果承認率", "確定率", "承認率"),
     "epc": ("EPC", "クリック単価"),
-    "cookie": ("Cookie有効期間", "クッキー有効期間", "再訪問期間", "クッキー期間", "cookie"),
+    # もしもは「再訪問 90日」と書く（「再訪問期間」ではない）
+    "cookie": (
+        "Cookie有効期間",
+        "クッキー有効期間",
+        "再訪問期間",
+        "クッキー期間",
+        "再訪問",
+        "cookie",
+    ),
     "review": ("提携審査", "提携申請", "提携状況", "審査", "提携"),
     "region": ("対応エリア", "対応地域", "対象エリア", "対象地域", "サービスエリア", "エリア"),
 }
@@ -119,6 +130,17 @@ _AREA_RE = re.compile("|".join(re.escape(w) for w in _AREA_WORDS))
 _REGION_CTX = re.compile(r"エリア|地域|限定|対応|対象|在住|お住まい|のみ|除く|を含む|近郊|圏内")
 _REGION_WINDOW = 12
 
+# 金額・率の形。値がこの形のときだけ採る別名に使う
+_MONEY = re.compile(r"\d[\d,]*(?:\.\d+)?\s*(?:円|%|％|ポイント|pt)")
+# 単独では別の語と紛れる別名。値が金額の形のときだけラベルとして扱う
+# （もしもの「成果」は報酬の見出しだが、「成果発生メール許可」のような行もある）
+_STRICT_ALIASES = {"成果"}
+# 成果条件が**見出しの側**にある書き方。A8 の「成果条件 ○○」とは前後が逆で、
+# もしもは「お問い合わせ完了後: 5,000円」と、条件を見出しに・金額を値に置く
+_CONDITION_AMOUNT = re.compile(
+    r"^(?P<cond>[^:：]{2,40}?)\s*[:：]\s*(?P<amount>\d[\d,]*(?:\.\d+)?\s*(?:円|%|％|ポイント|pt))$"
+)
+
 _IMMEDIATE = re.compile(r"即時|自動|無審査|提携済|提携中|提携可能")
 _NEEDS_REVIEW = re.compile(r"審査|承認制|要申請|申請が必要|申請中|未提携|提携申請")
 
@@ -174,10 +196,26 @@ def _split_records(text: str) -> list[_Record]:
         if _SEPARATOR.fullmatch(line):
             start_new(hand_over=False)  # 貼る人が入れた区切り。手前の行は前の案件のもの
             continue
-        pairs, head, i = _read_line(lines, start)
+        pairs, head, i, tiered = _read_line(lines, start)
         if head:
             pending.append(head)
         if not pairs:
+            continue
+        if tiered:
+            # 成果条件が見出しの側にある行。同じ案件の中で何度も出る（報酬が段階に分かれている
+            # と「お問い合わせ完了後: 5,000円」「成約後: 20,000円」と並ぶ）ので、
+            # **項目の繰り返しとしては数えない**。空いている項目を埋め、原文に残すだけにする。
+            # ただし見出しらしい行を挟んでいれば、そこから次の案件が始まっている
+            if pending and ("reward" in cur.seen or "condition" in cur.fields):
+                start_new()
+            elif not cur.head and pending:
+                cur.head = pending[-_HEAD_LINES:]
+                cur.lines = list(cur.head)
+                pending = []
+            for name, value in pairs:
+                if value:
+                    cur.fields.setdefault(name, value)
+            cur.lines += [ln for ln in lines[start:i] if ln]
             continue
         for name, value in pairs:
             if name in cur.seen:
@@ -198,18 +236,46 @@ def _split_records(text: str) -> list[_Record]:
     return records
 
 
-def _read_line(lines: list[str], i: int) -> tuple[list[tuple[str, str]], str, int]:
-    """1 行を読む。縦並びなら値の行も食べて、次に読む行の位置を返す。"""
+def _read_line(lines: list[str], i: int) -> tuple[list[tuple[str, str]], str, int, bool]:
+    """1 行を読む。縦並びなら値の行も食べて、次に読む行の位置を返す。
+
+    4 つ目の返り値は「成果条件が見出しの側にある行」だったか。報酬が段階に分かれていると
+    この形が同じ案件の中で何度も出るので、案件の切れ目に使わない。
+    """
     line = lines[i]
     lone = _LONE_LABEL_RE.fullmatch(line)
     if lone:
         name = _ALIAS_TO_FIELD[lone.group(1).lower()]
         value, nxt = _read_value(lines, i + 1, name)
-        return [(name, value)], "", nxt
+        return [(name, value)], "", nxt, False
     if _STATUS.fullmatch(line):
-        return [("review", line)], "", i + 1
+        return [("review", line)], "", i + 1, False
     pairs, head = _line_fields(line)
-    return pairs, head, i + 1
+    if not pairs:
+        tiered = _condition_amount(line)
+        if tiered:
+            return tiered, "", i + 1, True
+    return pairs, head, i + 1, False
+
+
+def _condition_amount(line: str) -> list[tuple[str, str]]:
+    """「お問い合わせ完了後: 5,000円」を (報酬, 成果条件) にする。
+
+    もしもアフィリエイトは成果条件を**見出しの側**に置き、値を金額にする。A8 の
+    「成果条件 ○○」とは前後が逆なので、ラベルの異名表だけでは 1 行まるごと落ちる。
+    どちらも原文のままなので、引用として扱える（quote-then-parse、ADR 0004）。
+    """
+    m = _CONDITION_AMOUNT.fullmatch(line)
+    if m is None:
+        return []
+    cond = m.group("cond").strip(_SEP)
+    # 見出し側が語であること。数字だけ・記号だけの行は成果条件ではない
+    if len(cond) < 2 or not _HAS_WORD.search(cond):
+        return []
+    # 既知の項目名なら、そちらの読み方が正しい（「クリック単価: 56.3円」は EPC）
+    if _LABEL_RE.search(cond):
+        return []
+    return [("reward", m.group("amount")), ("condition", cond)]
 
 
 def _read_value(lines: list[str], i: int, name: str) -> tuple[str, int]:
@@ -256,7 +322,7 @@ def _line_fields(line: str) -> tuple[list[tuple[str, str]], str]:
             end = matches[j].start() if j < len(matches) else len(line)
             value = line[m.end() : end].strip(_SEP)
         i = j
-        if _plausible(name, value):
+        if _plausible(name, value, m.group(1)):
             pairs.append((name, value))
             continue
         # ラベルに見えただけ。切らずに直前の値（無ければ見出し）へ戻す
@@ -268,10 +334,15 @@ def _line_fields(line: str) -> tuple[list[tuple[str, str]], str]:
     return pairs, head
 
 
-def _plausible(name: str, value: str) -> bool:
-    """その項目の値として筋が通るか。通らなければラベルとして扱わない。"""
+def _plausible(name: str, value: str, alias: str = "") -> bool:
+    """その項目の値として筋が通るか。通らなければラベルとして扱わない。
+
+    `alias` が `_STRICT_ALIASES` にあるときは、値が金額の形であることまで求める。
+    """
     if not value:
         return False
+    if alias in _STRICT_ALIASES:
+        return bool(_MONEY.search(value))
     if name in ("reward", "epc"):
         return bool(re.search(r"\d", value))
     if name == "approval_rate":

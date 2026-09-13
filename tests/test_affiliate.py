@@ -337,3 +337,70 @@ def test_epc_above_the_floor_still_applies(vertical_result):
     s = next(x for x in vertical_result.items if "サンプル解体ナビ" in x.candidate.name)
     assert s.verdict is Verdict.apply
     assert s.candidate.epc_yen == 56.3
+
+
+MOSHIMO = Path(__file__).parent / "fixtures" / "affiliate" / "asp-list-moshimo.txt"
+
+
+@pytest.fixture
+def moshimo():
+    return parse_offers(MOSHIMO.read_text(encoding="utf-8"), asp="moshimo")
+
+
+def test_a_listing_with_another_asps_labels_still_splits(moshimo):
+    """もしもアフィリエイトは A8 と項目名も構造も違う。読めないと 1 件に潰れる。
+
+    実際に起きたのは「8 件のうち 3 件しか切れず、中身は画面部品だけ」という壊れ方。
+    切れ目は項目の繰り返しで決まるので、項目名が 1 つも当たらないと切れない。
+    """
+    assert [c.name for c in moshimo] == [
+        "空き家片付けセンター|空き家の相談・空き家買取・残置物撤去等の申込",
+        "不用品回収のスグナラ|即日対応の不用品回収",
+        "遺品整理の窓口",
+    ]
+    assert [c.advertiser for c in moshimo] == [
+        "株式会社つなぐ",
+        "株式会社ロジクエスト",
+        "株式会社れんげ",
+    ]
+
+
+def test_the_reward_label_is_just_成果(moshimo):
+    """報酬の見出しが「成果」だけの ASP がある。"""
+    assert [c.reward_yen for c in moshimo] == [5000, 3000, 5000]
+
+
+def test_成果_is_only_a_label_when_its_value_is_money():
+    """「成果発生メール許可」を報酬として読まない（値が金額の形のときだけ採る）。"""
+    rows = parse_offers("案件A\n株式会社A\n成果発生メール許可\n成果 5,000円\n再訪問 90日\n")
+    assert len(rows) == 1
+    assert rows[0].reward_yen == 5000
+    assert "成果発生メール許可" not in (rows[0].reward_quote or "")
+
+
+def test_the_cookie_label_is_再訪問_without_期間(moshimo):
+    assert [c.cookie_days for c in moshimo] == [90, 30, 60]
+
+
+def test_the_condition_can_be_on_the_label_side(moshimo):
+    """「お問い合わせ完了後: 5,000円」は条件が見出し・金額が値。A8 とは前後が逆。"""
+    assert [c.condition for c in moshimo] == [
+        "お問い合わせ完了後",
+        "お申し込み完了後",
+        "お問い合わせ完了後",
+    ]
+    assert all("成果条件が読めなかった" not in c.notes for c in moshimo)
+
+
+def test_a_tiered_reward_does_not_split_the_record(moshimo):
+    """段階のある報酬（問い合わせ 5,000 円／成約 20,000 円）は 1 件のまま。"""
+    last = moshimo[-1]
+    assert last.reward_yen == 5000  # 最初の段が報酬、残りは原文に残る
+    assert "成約後: 20,000円" in last.raw
+
+
+def test_a_known_label_still_wins_over_the_condition_shape():
+    """「クリック単価: 56.3円」は EPC であって成果条件ではない。"""
+    rows = parse_offers("案件B\n株式会社B\n成果 1,000円\nクリック単価: 56.3円\n再訪問 30日\n")
+    assert rows[0].epc_yen == 56.3
+    assert rows[0].condition == ""
