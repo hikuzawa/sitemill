@@ -15,6 +15,8 @@
 - `affiliate/` ASP 案件の選定（貼り付け→構造化→判定→申請順、ADR 0019）。物差しは `profiles/` の雛形を
   サービス側にコピーして渡す
 - `docs/adr/` 設計判断。方針を変えるときは新しい ADR を足す（既存は上書きしない）
+- `docs/runbook/` サービス側で行う手順。`search-console.md` は Search Console の取り込みを
+  サービスで有効にする手順（**akiya-atlas への適用はこれを読む**）
 
 ## コマンド
 - `uv sync` 依存を入れる / `uv run pytest` / `uv run ruff check src tests` / `uv run ruff format src tests`
