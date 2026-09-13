@@ -166,11 +166,27 @@ def _plain(html: str, limit: int = 160) -> str:
     return " ".join(text.split())[:limit]
 
 
+# カテゴリページで、そのカテゴリのファイルが並んでいるところ。ページ全体から File: のリンクを
+# 拾うと、案内テンプレート（四国八十八箇所の一覧など）に貼られた**別の場所の写真**が混ざる。
+# 実際、12 の寺がどれも善通寺の写真を採り、男木島と女木島が同じ古地図を採った
+_MEDIA_CONTAINERS = ("#mw-category-media", ".mw-category-media", "#mw-category-generated .gallery")
+
+
 def category_files(html: str, *, base_url: str = COMMONS, limit: int = 40) -> list[str]:
-    """カテゴリページの HTML から、ファイルページの URL を集める。"""
+    """カテゴリページの HTML から、ファイルページの URL を集める。
+
+    見るのは**そのカテゴリのファイル一覧の中だけ**。一覧が見つからないページでは、
+    従来どおりページ全体から拾う（古い版のレイアウトでも動くように）。
+    """
+    tree = HTMLParser(html)
+    root = None
+    for selector in _MEDIA_CONTAINERS:
+        root = tree.css_first(selector)
+        if root is not None:
+            break
     out: list[str] = []
     seen: set[str] = set()
-    for node in HTMLParser(html).css("a[href]"):
+    for node in (root or tree).css("a[href]"):
         href = node.attributes.get("href") or ""
         if not _FILE_LINK.match(href):
             continue

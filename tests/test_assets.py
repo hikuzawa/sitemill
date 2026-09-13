@@ -505,3 +505,31 @@ def test_category_links_are_followed_not_guessed() -> None:
 
 def test_no_category_link_means_no_category() -> None:
     assert find_category_links("<html><body><p>リンクなし</p></body></html>") == []
+
+
+NAVBOX_CATEGORY = """<html><body>
+<div id="mw-content-text">
+<table class="navbox"><tr><td>
+<a href="/wiki/File:Zentsu-ji_in_Zentsu-ji_City.jpg">四国八十八箇所の案内</a>
+</td></tr></table>
+<div id="mw-category-media">
+<a href="/wiki/File:Koyamaji_hondo.jpg">Koyamaji hondo.jpg</a>
+</div>
+</div></body></html>"""
+
+
+def test_only_the_categorys_own_files_are_taken() -> None:
+    """案内テンプレートに貼られた別の場所の写真を採らない。
+
+    実際に起きた壊れ方: 12 の寺のページがどれも善通寺の写真になり、男木島と女木島が
+    同じ古地図になった。カテゴリの一覧の外にある File: リンクを拾っていたため。
+    """
+    assert category_files(NAVBOX_CATEGORY) == [
+        "https://commons.wikimedia.org/wiki/File:Koyamaji_hondo.jpg"
+    ]
+
+
+def test_a_page_without_a_media_list_still_yields_files() -> None:
+    """一覧の器が無いレイアウトでは、これまでどおりページ全体から拾う。"""
+    html = '<html><body><a href="/wiki/File:A.jpg">A</a></body></html>'
+    assert category_files(html) == ["https://commons.wikimedia.org/wiki/File:A.jpg"]
