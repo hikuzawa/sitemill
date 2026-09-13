@@ -187,13 +187,13 @@ def test_site_footer_does_not_poison_the_license_reading() -> None:
     assert page.verdict.allowed  # ライセンス欄だけを見ているので footer に引っ張られない
 
 
-def test_share_alike_file_is_rejected() -> None:
+def test_share_alike_file_is_adopted_since_2026_09_14() -> None:
+    """以前は継承つきを外していた。義務は写真とその改変物に及ぶもので、ページには及ばない。"""
     page = read_file_page(
         FILE_PAGE.format(license=CC_BY_SA), "https://commons.wikimedia.org/wiki/File:X.jpg"
     )
-    assert not page.verdict.allowed
-    assert page.licenses_found == ("CC BY-SA（継承）",)
-    assert "ホワイトリストに無い" in page.verdict.reason
+    assert page.verdict.allowed
+    assert page.licenses_found == ("CC-BY-SA-4.0",)
 
 
 def test_cc0_file_is_adopted() -> None:
@@ -252,12 +252,39 @@ def test_public_domain_mark_is_adopted() -> None:
     assert page.verdict.allowed and page.verdict.license_id is LicenseId.PD_MARK_1_0
 
 
-def test_every_whitelisted_license_is_free_of_share_alike() -> None:
-    """継承つきを足すとサイトに取り消せない義務が生じる。ホワイトリストの不変条件として固定する。"""
-    from sitemill.models.license import NO_SHARE_ALIKE, WHITELIST
+def test_share_alike_is_allowed_but_kept_separable() -> None:
+    """継承つきは採る（2026-09-14）。継承の義務は写真とその改変物に及ぶもので、
+    写真を載せたページ（編集物）には及ばない。
 
-    assert WHITELIST == NO_SHARE_ALIKE
-    assert all("SA" not in lic.value.upper().replace("-", "") for lic in WHITELIST)
+    継承を避けたいサービスが選べるよう、`NO_SHARE_ALIKE` は別に持つ。
+    """
+    from sitemill.models.license import NO_SHARE_ALIKE, SHARE_ALIKE, WHITELIST
+
+    assert SHARE_ALIKE <= WHITELIST
+    assert NO_SHARE_ALIKE == WHITELIST - SHARE_ALIKE
+    assert LicenseId.CC_BY_SA_4_0 in SHARE_ALIKE
+    assert LicenseId.CC_BY_4_0 in NO_SHARE_ALIKE
+
+
+def test_non_commercial_and_no_derivatives_are_never_allowed() -> None:
+    """継承を採っても、非営利・改変禁止は採らない（サイトは広告を出し、縮小もする）。"""
+    for html in (
+        '<a href="https://creativecommons.org/licenses/by-nc/4.0/">CC BY-NC 4.0</a>',
+        '<a href="https://creativecommons.org/licenses/by-nd/4.0/">CC BY-ND 4.0</a>',
+    ):
+        page = read_file_page(
+            FILE_PAGE.format(license=html), "https://commons.wikimedia.org/wiki/File:X.jpg"
+        )
+        assert not page.verdict.allowed
+
+
+def test_a_share_alike_file_is_adopted_with_its_licence_name() -> None:
+    """クレジットに出す名前が、原文のライセンスと同じであること（出典ページで確かめられる）。"""
+    page = read_file_page(
+        FILE_PAGE.format(license=CC_BY_SA), "https://commons.wikimedia.org/wiki/File:X.jpg"
+    )
+    assert page.verdict.allowed and page.verdict.license_id is LicenseId.CC_BY_SA_4_0
+    assert page.verdict.short_label == "CC BY-SA 4.0"  # クレジットに出す表記
 
 
 MULTI_LICENSE = """<html><body>
@@ -271,23 +298,33 @@ MULTI_LICENSE = """<html><body>
 </body></html>"""
 
 
-def test_multi_licensed_file_is_adopted_on_the_permissive_box() -> None:
-    """Commons の多重ライセンスは普通。箱をまとめると制限側が許可側を潰すので箱ごとに判定する。"""
+def test_multi_licensed_file_takes_the_box_with_the_fewest_obligations() -> None:
+    """Commons の多重ライセンスは普通。箱ごとに判定し、継承の無い方を選ぶ。"""
     page = read_file_page(
         MULTI_LICENSE.format(first=CC_BY_SA, second=CC_BY),
         "https://commons.wikimedia.org/wiki/File:Pano.jpg",
     )
     assert page.verdict.allowed and page.verdict.license_id is LicenseId.CC_BY_4_0
-    assert page.licenses_found == ("GFDL", "CC BY-SA（継承）", "CC-BY-4.0")
+    assert page.licenses_found == ("GFDL", "CC-BY-SA-4.0", "CC-BY-4.0")
 
 
-def test_multi_licensed_file_with_no_permissive_box_is_rejected_with_a_readable_reason() -> None:
+def test_a_gfdl_and_share_alike_file_is_adopted_under_share_alike() -> None:
+    """GFDL との併記は、CC BY-SA が選べるならその条件で採る。"""
     page = read_file_page(
         MULTI_LICENSE.format(first=CC_BY_SA, second=CC_BY_SA),
         "https://commons.wikimedia.org/wiki/File:Pano.jpg",
     )
+    assert page.verdict.allowed and page.verdict.license_id is LicenseId.CC_BY_SA_4_0
+
+
+def test_a_file_with_no_whitelisted_box_is_rejected_with_a_readable_reason() -> None:
+    nc = '<a href="https://creativecommons.org/licenses/by-nc/4.0/">CC BY-NC 4.0</a>'
+    page = read_file_page(
+        MULTI_LICENSE.format(first=nc, second=nc),
+        "https://commons.wikimedia.org/wiki/File:Pano.jpg",
+    )
     assert not page.verdict.allowed
-    assert page.verdict.reason == "ホワイトリストに無いライセンスのみ（GFDL、CC BY-SA（継承））"
+    assert "ホワイトリストに無いライセンスのみ" in page.verdict.reason
 
 
 def test_tracking_query_is_stripped_and_a_thumbnail_is_used() -> None:

@@ -24,6 +24,7 @@ from selectolax.parser import HTMLParser
 
 from sitemill.license.detector import detect_license
 from sitemill.models import LicenseVerdict
+from sitemill.models.license import NO_SHARE_ALIKE
 
 log = logging.getLogger(__name__)
 
@@ -275,7 +276,11 @@ def read_file_page(html: str, page_url: str) -> CommonsFile:
     credit_name = f"{title} / Wikimedia Commons"
     verdicts = [detect_license(box, page_url, credit_name=credit_name) for box in boxes]
     found = tuple(box_label(box, v) for box, v in zip(boxes, verdicts, strict=True))
-    allowed = next((v for v in verdicts if v.allowed), None)
+    # 継承（BY-SA）と継承なし（BY・CC0）が両方あるファイルがある。義務の少ない方を選ぶ
+    allowed = next(
+        (v for v in verdicts if v.allowed and v.license_id in NO_SHARE_ALIKE),
+        next((v for v in verdicts if v.allowed), None),
+    )
     if allowed is not None:
         verdict = allowed
     elif not boxes:
