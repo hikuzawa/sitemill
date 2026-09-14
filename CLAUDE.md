@@ -20,7 +20,10 @@
 
 ## コマンド
 - `uv sync` 依存を入れる / `uv run pytest` / `uv run ruff check src tests` / `uv run ruff format src tests`
-- CLI はサービス側のルート（site.toml のある場所）で `uv run sitemill <discover|crawl|extract|build|deploy|run|eval|status>` を実行する
+- CLI はサービス側のルート（site.toml のある場所）で `uv run sitemill <discover|crawl|extract|build|deploy|run|eval|status>` を実行する。
+  **どのコマンドも実行前に「対象: <サービス id>（<パス>）」を名乗る**。CWD から上に site.toml を探す仕組みなので、
+  別のサービスのディレクトリで走らせると気づかずにそちらを読み書きしてしまう（実際に起きた）。
+  自動化や手順書では `--site <id>` を付け、違うサービスに当たったら止める
 - `uv run sitemill offers screen|emit` は案件の選定。site.toml を必要としないのでどこでも実行できる（ADR 0019）
 - `uv run sitemill eval --record` は本番の LLM で fixture の応答を取り直してから計測する（旧応答は llm_response.previous.json に残る）
 

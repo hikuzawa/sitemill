@@ -26,12 +26,33 @@ WorkersOpt = Annotated[
 ]
 
 
+# `--site` で名指しされたサービス。app のコールバックが受け取る
+_EXPECTED_SITE: str = ""
+
+
 def _runtime(root: Path | None) -> commands.Runtime:
+    """対象のサービスを決めて、**必ず名乗ってから**返す。
+
+    `Runtime.open()` は CWD から上に site.toml を探すので、別のサービスのディレクトリで
+    走らせると、気づかないままそちらのデータを読み書きしてしまう（実際に起きた。
+    japan-open-today のつもりで走らせた取り込みが akiya-atlas のデータを作った）。
+    そこで、どのコマンドでも実行前に「どのサービスのどこを見ているか」を出す。
+    `--site` を付ければ、違うサービスに当たったときに何もせず止まる。
+    """
     try:
-        return commands.Runtime.open(root)
+        rt = commands.Runtime.open(root)
     except (FileNotFoundError, ValueError, TypeError) as e:
         typer.echo(f"エラー: {e}", err=True)
         raise typer.Exit(code=2) from e
+    if _EXPECTED_SITE and rt.ws.site.id != _EXPECTED_SITE:
+        typer.echo(
+            f"エラー: --site {_EXPECTED_SITE} を指定しましたが、見つかったのは "
+            f"{rt.ws.site.id}（{rt.ws.root}）です。何もしていません",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+    typer.echo(f"対象: {rt.ws.site.id}（{rt.ws.root}）", err=True)
+    return rt
 
 
 def _report(report: object) -> None:
@@ -53,7 +74,16 @@ def _report(report: object) -> None:
 @app.callback()
 def main(
     verbose: Annotated[bool, typer.Option("--verbose", "-v", help="詳細ログ")] = False,
+    site: Annotated[
+        str,
+        typer.Option(
+            "--site",
+            help="対象のサービス id（site.toml の [site] id）。違うサービスに当たったら止める",
+        ),
+    ] = "",
 ) -> None:
+    global _EXPECTED_SITE
+    _EXPECTED_SITE = site.strip()
     logging.basicConfig(
         level=logging.DEBUG if verbose else logging.INFO,
         format="%(levelname)s %(name)s: %(message)s",

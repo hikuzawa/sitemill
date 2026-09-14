@@ -226,3 +226,34 @@ def test_report_records_whether_it_ran_in_ci(monkeypatch: pytest.MonkeyPatch) ->
     assert new_report("svc", "crawl").ci is False
     monkeypatch.setenv("CI", "true")
     assert new_report("svc", "crawl").ci is True
+
+
+def test_every_command_names_the_service_it_found(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """CWD から上に site.toml を探すので、別のサービスのディレクトリで走ると気づけない。
+
+    実際に起きた（japan-open-today のつもりの取り込みが akiya-atlas のデータを作った）。
+    どのコマンドも、実行前に「どのサービスのどこを見ているか」を名乗る。
+    """
+    import sitemill.cli as cli
+
+    make_workspace(tmp_path)
+    rt = cli._runtime(tmp_path)
+    assert rt.ws.site.id == "dummy"
+    assert f"対象: dummy（{tmp_path}）" in capsys.readouterr().err
+
+
+def test_naming_another_service_stops_before_touching_anything(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`--site` で名指ししたサービスと違えば、何もせずに止まる。"""
+    import typer
+
+    import sitemill.cli as cli
+
+    make_workspace(tmp_path)
+    monkeypatch.setattr(cli, "_EXPECTED_SITE", "akiya-atlas")
+    with pytest.raises(typer.Exit) as exit_info:
+        cli._runtime(tmp_path)
+    assert exit_info.value.exit_code == 2
