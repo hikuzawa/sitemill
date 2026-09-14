@@ -404,3 +404,60 @@ def test_a_known_label_still_wins_over_the_condition_shape():
     rows = parse_offers("案件B\n株式会社B\n成果 1,000円\nクリック単価: 56.3円\n再訪問 30日\n")
     assert rows[0].epc_yen == 56.3
     assert rows[0].condition == ""
+
+
+MOSHIMO_STATUS = Path(__file__).parent / "fixtures" / "affiliate" / "asp-list-moshimo-status.txt"
+
+
+@pytest.fixture
+def moshimo_status():
+    """提携状況の行が案件名の直後に来る並び（akiya-atlas の実データ 31 件と同じ形）。"""
+    return parse_offers(MOSHIMO_STATUS.read_text(encoding="utf-8"), asp="moshimo")
+
+
+def test_a_partnership_status_is_not_the_offer_name(moshimo_status):
+    """案件名の次に提携状況が来る並びで、状況の語を名前として拾わない。
+
+    実データでは 31 件中 30 件の名前が「未申請」になり、本当の名前は広告主の欄に入っていた。
+    提携状況の語を知っていれば、名前でも見出しでもなく提携状況として読む。
+    """
+    assert [c.name for c in moshimo_status] == [
+        "不動産一括査定「スマイスター」",
+        "訳あり物件買取プロ",
+        "空き家売却の窓口",
+    ]
+    assert all(c.advertiser != "未申請" for c in moshimo_status)
+
+
+def test_未申請_means_the_application_is_still_ours_to_make(moshimo_status):
+    """「未申請」はこちらがまだ申請していない状態。提携中と同じ扱いにはしない。"""
+    states = {c.name: c.review_required for c in moshimo_status}
+    assert states["不動産一括査定「スマイスター」"] is True
+    assert states["空き家売却の窓口"] is False  # 提携中は申請不要
+
+
+def test_an_asp_flag_line_does_not_push_the_next_name_out(moshimo_status):
+    """「本人 NG」「リスティングNG」は案件に付く可否の札。見出しにすると名前が 1 行ずれる。"""
+    assert not any(c.name.startswith(("本人", "リスティング")) for c in moshimo_status)
+    # 前の案件の札や次の案件の見出しが、原文に混ざらない（種別の判定が引きずられる）
+    for c in moshimo_status:
+        assert "本人 NG" not in c.raw and "リスティングNG" not in c.raw
+    first = moshimo_status[0]
+    assert "訳あり物件買取プロ" not in first.raw
+
+
+def test_the_records_still_carry_their_own_numbers(moshimo_status):
+    """区切りがずれていないことを、値の側からも確かめる。"""
+    assert [c.reward_yen for c in moshimo_status] == [1500, 20000, 8000]
+    assert [c.cookie_days for c in moshimo_status] == [90, 60, 30]
+    assert [c.condition for c in moshimo_status] == [
+        "査定依頼完了後",
+        "査定依頼完了後",
+        "お問い合わせ完了後",
+    ]
+
+
+def test_the_result_count_heading_is_screen_furniture():
+    """「検索結果 31件」は件数を連れている。全体一致で見るので後ろまで含めて捨てる。"""
+    rows = parse_offers("検索結果 31件\n案件A\n成果 1,000円\n再訪問 30日\n")
+    assert [c.name for c in rows] == ["案件A"]
