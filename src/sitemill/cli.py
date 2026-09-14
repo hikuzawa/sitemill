@@ -526,5 +526,33 @@ def search_report(
     typer.echo(markdown(summary))
 
 
+runs_app = typer.Typer(help="実行レポートのまとめ（ADR 0010・0014）", no_args_is_help=True)
+app.add_typer(runs_app, name="runs")
+
+
+@runs_app.command("report")
+def runs_report(
+    root: RootOpt = None,
+    days: Annotated[int, typer.Option("--days", help="さかのぼる日数")] = 7,
+    source: Annotated[
+        str, typer.Option("--source", help="ci（日次のみ）/ local（手元のみ）/ all")
+    ] = "ci",
+    save: Annotated[bool, typer.Option("--save/--no-save", help="data/runs に記録を残す")] = True,
+) -> None:
+    """直近 N 日の実行時間・費用・自己修復・抽出の充足率を Markdown で出す。"""
+    from sitemill.metrics import weekly
+
+    rt = _runtime(root)
+    if source not in ("ci", "local", "all"):
+        typer.echo("エラー: --source は ci / local / all のいずれか", err=True)
+        raise typer.Exit(code=2)
+    for line in weekly.report(rt.ws, days=days, source=source):
+        typer.echo(line)
+    if save:
+        path = weekly.write_snapshot(rt.ws, days=days, source=source)
+        typer.echo("")
+        typer.echo(f"（記録: {path}）", err=True)
+
+
 if __name__ == "__main__":  # pragma: no cover
     app()
