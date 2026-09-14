@@ -411,7 +411,11 @@ MOSHIMO_STATUS = Path(__file__).parent / "fixtures" / "affiliate" / "asp-list-mo
 
 @pytest.fixture
 def moshimo_status():
-    """提携状況の行が案件名の直後に来る並び（akiya-atlas の実データ 31 件と同じ形）。"""
+    """提携状況の行が案件の中に混ざる並び（akiya-atlas の実データ 31 件と同じ形）。
+
+    1 件目は項目の最後、2・3 件目は案件名の直後に来る。どちらの位置でも、状況の語は
+    その案件の状況として読み、次の案件の見出しには渡さない。
+    """
     return parse_offers(MOSHIMO_STATUS.read_text(encoding="utf-8"), asp="moshimo")
 
 
