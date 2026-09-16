@@ -178,3 +178,64 @@ def test_discover_finds_candidates_from_links_and_sitemap(tmp_path: Path) -> Non
     assert "https://city.example/kurashi/akiyabank/bukken.html" in urls
     assert "https://city.example/kanko/" not in urls
     assert candidates[0].score == 4
+
+
+def _restore(snapshot: Path, raw_root: Path) -> None:
+    """CI のキャッシュ復元の真似。前に保存した生 HTML で手元を上書きする。"""
+    import shutil
+
+    shutil.rmtree(raw_root)
+    shutil.copytree(snapshot, raw_root)
+
+
+@respx.mock
+def test_a_cache_older_than_the_state_is_refetched_without_an_etag(tmp_path: Path) -> None:
+    """状態はコミットしたが配置で落ちた実行の次に、古いキャッシュを復元した場合。
+
+    CI のキャッシュは成功した実行でしか保存されない。状態（ETag と content_hash）は新しく、
+    生 HTML は古い。ETag を付けると 304 が返り、古い本文を新しいハッシュの本文として読む。
+    """
+    import shutil
+
+    respx.get("https://akiya.example/robots.txt").mock(return_value=httpx.Response(404))
+    page = {"body": DETAIL.format(n=1, price=300), "etag": '"v1"'}
+    sent: list[str | None] = []
+
+    def detail(request: httpx.Request) -> httpx.Response:
+        sent.append(request.headers.get("If-None-Match"))
+        if request.headers.get("If-None-Match") == page["etag"]:
+            return httpx.Response(304)
+        return httpx.Response(200, text=page["body"], headers={"etag": page["etag"]})
+
+    respx.get("https://akiya.example/bukken/1").mock(side_effect=detail)
+    source = _source()
+    source.pages = [SeedPage(url="https://akiya.example/bukken/1", kind=PageKind.listing_detail)]
+    state, raw_root = CrawlState(), tmp_path / "raw"
+    raw = RawCache(raw_root)
+
+    with _client() as client:
+        crawl_source(source, client, state, raw)  # 1 回目: 成功した実行。キャッシュが保存される
+    shutil.copytree(raw_root, tmp_path / "saved-cache")
+
+    page.update(body=DETAIL.format(n=1, price=250), etag='"v2"')  # 相手のページが変わる
+    with _client() as client:
+        crawl_source(source, client, state, raw)  # 2 回目: 状態はコミットされたが配置で落ちた
+    st = state.get("https://akiya.example/bukken/1")
+    assert st is not None and st.etag == '"v2"'
+
+    _restore(tmp_path / "saved-cache", raw_root)  # 3 回目の前: 1 回目のキャッシュが戻る
+    assert not raw.matches_state(source.id, st.url, st.content_hash)
+    with _client() as client:
+        third = crawl_source(source, client, state, raw)
+
+    assert sent[-1] is None  # ETag を付けずに取り直した
+    assert third.count("stale_cache") == 1 and third.count("not_modified") == 0
+    assert third.count("changed") == 0  # 状態は元から新しい本文を指していた
+    assert "250万円" in (raw.load_text(source.id, st.url) or "")  # キャッシュも新しくなった
+    assert raw.matches_state(source.id, st.url, st.content_hash)
+
+    # 揃った後は、これまでどおり条件付きで取りに行く
+    with _client() as client:
+        fourth = crawl_source(source, client, state, raw)
+    assert sent[-1] == '"v2"' and fourth.count("not_modified") == 1
+    assert fourth.count("stale_cache") == 0

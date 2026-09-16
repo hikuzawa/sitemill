@@ -257,3 +257,35 @@ def test_naming_another_service_stops_before_touching_anything(
     with pytest.raises(typer.Exit) as exit_info:
         cli._runtime(tmp_path)
     assert exit_info.value.exit_code == 2
+
+
+@respx.mock
+def test_extract_does_not_read_a_cache_older_than_the_state(rt: commands.Runtime) -> None:
+    """古い本文から抽出すると、その値に新しい content_hash が付いて正しい抽出に見える。"""
+    import shutil
+
+    _mock_site()
+    commands.cmd_crawl(rt)
+    raw_root = rt.ws.raw_dir
+    shutil.copytree(raw_root, rt.ws.root / "saved-cache")
+
+    # 物件 2 の価格が変わり、再巡回で状態だけが新しくなる。その後に古いキャッシュが戻る
+    respx.get("https://akiya.example/bukken/2").mock(
+        return_value=httpx.Response(200, text=DETAIL.format(n=2, price="980"))
+    )
+    commands.cmd_crawl(rt, force=True)  # 巡回間隔の判定を飛ばして、翌日の実行の代わりにする
+    shutil.rmtree(raw_root)
+    shutil.copytree(rt.ws.root / "saved-cache", raw_root)
+
+    provider = FixtureProvider(_responses())
+    report = commands.cmd_extract(rt, provider=provider)
+    assert report.stages["extract"]["stale_cache"] == 1
+    assert any("キャッシュが巡回状態より古い" in e for e in report.errors)
+    records = rt.ws.records_dir / "dummy-city.jsonl"
+    text = records.read_text(encoding="utf-8") if records.is_file() else ""
+    assert '"value": 12000000' not in text  # 古い本文（1,200 万円）を新しいハッシュで取り込まない
+
+    from sitemill.diff.state import CrawlState
+
+    state = CrawlState.load(rt.state_path)
+    assert state.get("https://akiya.example/bukken/2").pending_extract  # type: ignore[union-attr]

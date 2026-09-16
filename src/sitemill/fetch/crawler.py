@@ -25,6 +25,7 @@ class CrawledPage:
     status: int
     changed: bool = False
     not_modified: bool = False
+    stale_cache: bool = False  # キャッシュが状態より古かったので、条件を付けずに取り直した
     error: str | None = None
 
 
@@ -43,6 +44,7 @@ class CrawlSummary:
                 "unchanged": p.status in (200, 304) and not p.changed,
                 "not_modified": p.not_modified,
                 "errors": p.error is not None and not p.not_modified,
+                "stale_cache": p.stale_cache,
             }[key]
         )
 
@@ -98,7 +100,10 @@ def crawl_source(
 
         st = state.get_or_create(url, source.id, str(kind))
         cached = raw.load(source.id, url)
-        use_conditional = cached is not None and not force
+        # キャッシュが状態の指す本文と違えば、ETag を付けない。付けると 304 が返り、
+        # 古い本文を新しい content_hash の本文として読んでしまう（RawCache.matches_state）
+        stale_cache = cached is not None and not raw.matches_state(source.id, url, st.content_hash)
+        use_conditional = cached is not None and not stale_cache and not force
         result = client.get(
             url,
             etag=st.etag if use_conditional else None,
@@ -107,7 +112,7 @@ def crawl_source(
         )
         st.seen_count += 1
         st.status = result.status
-        page = CrawledPage(url=url, kind=kind, status=result.status)
+        page = CrawledPage(url=url, kind=kind, status=result.status, stale_cache=stale_cache)
 
         html: str | None = None
         if result.not_modified:

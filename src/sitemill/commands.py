@@ -167,7 +167,7 @@ def cmd_crawl(
         finally:
             state.save(rt.state_path)
         for summary in summaries:
-            for key in ("fetched", "changed", "unchanged", "not_modified", "errors"):
+            for key in ("fetched", "changed", "unchanged", "not_modified", "errors", "stale_cache"):
                 report.bump("crawl", key, summary.count(key))
             for page in summary.pages:
                 if page.error and not page.not_modified:
@@ -274,6 +274,17 @@ def cmd_extract(
                     {
                         "error": f"{st.url}: 生 HTML のキャッシュがない。先に crawl を実行する",
                         "bump": ("extract", "missing_cache"),
+                    }
+                )
+                continue
+            if not raw.matches_state(src.id, st.url, st.content_hash):
+                # 古い本文から抽出すると、その値に新しい content_hash が付いて正しい抽出に見える。
+                # 抽出せず pending のまま残す。次の crawl が条件を付けずに取り直す
+                out.append(
+                    {
+                        "error": f"{st.url}: 生 HTML のキャッシュが巡回状態より古い。"
+                        "次の crawl で取り直してから抽出する",
+                        "bump": ("extract", "stale_cache"),
                     }
                 )
                 continue

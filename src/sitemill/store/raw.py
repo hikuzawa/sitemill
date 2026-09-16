@@ -23,6 +23,23 @@ class RawCache:
         write_json(path.with_suffix(".json"), {"url": url, **meta})
         return path
 
+    def matches_state(self, source_id: str, url: str, content_hash: str | None) -> bool:
+        """このキャッシュが、巡回状態の指す本文と同じものか。
+
+        比べるのは保存時にメタへ記録した `content_hash`（正規化後のハッシュで、状態と同じ計算）。
+        本文から計算し直さないのは、サービスが `ignore_patterns` などを変えただけで全ページが
+        食い違いになり、取り直しと再抽出が一斉に起きるため。
+
+        キャッシュは状態より古くなりうる。CI のキャッシュは成功した実行でしか保存されないが、
+        状態のコミットは配置より前にある。「状態はコミットしたが配置で落ちた」実行の次は、
+        古いキャッシュと新しい状態（ETag）の組になり、条件付き GET が 304 を返して古い本文を
+        読むことになる（ADR 0024 追記）。
+        """
+        if content_hash is None or not self.path_for(source_id, url).is_file():
+            return False
+        meta = read_json(self.path_for(source_id, url).with_suffix(".json"), {}) or {}
+        return meta.get("content_hash") == content_hash
+
     def load(self, source_id: str, url: str) -> tuple[bytes, dict[str, Any]] | None:
         path = self.path_for(source_id, url)
         if not path.is_file():
