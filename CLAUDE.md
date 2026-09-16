@@ -19,6 +19,7 @@
 - `docs/adr/` 設計判断。方針を変えるときは新しい ADR を足す（既存は上書きしない）
 - `docs/runbook/` サービス側で行う手順。`search-console.md` は Search Console の取り込みを
   サービスで有効にする手順（**akiya-atlas への適用はこれを読む**）
+- `docs/runbook/upgrade-0.5.2-to-0.6.0.md` は akiya-atlas を v0.6.0 に上げる手順と、v0.5.2 からの差分
 
 ## コマンド
 - `uv sync` 依存を入れる / `uv run pytest` / `uv run ruff check src tests` / `uv run ruff format src tests`
