@@ -20,6 +20,7 @@ from jinja2 import (
 from markupsafe import Markup
 
 from sitemill.build import preflight
+from sitemill.build.lastmod import LastmodLedger
 from sitemill.build.pii import PiiPolicy, allow_also, default_jp_gov_policy, scan_text
 from sitemill.build.trust import verify_page_html
 from sitemill.charts import Chart
@@ -56,6 +57,10 @@ class BuildResult:
     pages: int = 0
     files: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    # サイトマップの lastmod（ADR 0025）。記録していないビルドでは 0 のまま
+    lastmod_changed: int = 0
+    lastmod_added: int = 0
+    lastmod_kept: int = 0
 
 
 # --- Jinja フィルタ ---------------------------------------------------------
@@ -229,11 +234,25 @@ def fmt_money(value: int | None, locale: LocaleConfig | str | None = None) -> st
 # --- ビルダー ---------------------------------------------------------------
 
 
+def _in_sitemap(page: Page) -> bool:
+    return not page.meta.noindex and page.meta.path.endswith(".html")
+
+
 class SiteBuilder:
-    def __init__(self, ws: Workspace, service: Service, *, now: datetime | None = None) -> None:
+    def __init__(
+        self,
+        ws: Workspace,
+        service: Service,
+        *,
+        now: datetime | None = None,
+        track_lastmod: bool = False,
+    ) -> None:
         self.ws = ws
         self.service = service
         self.now = now or utcnow()
+        # lastmod を「中身が最後に変わった日」にする記録を data/state に残すか（ADR 0025）。
+        # `sitemill build` だけが残す。テストや調査で SiteBuilder を直接使うときは状態を書かない
+        self.track_lastmod = track_lastmod
         loaders = [PackageLoader("sitemill", "templates")]
         if ws.templates_dir.is_dir():
             loaders.insert(0, FileSystemLoader(str(ws.templates_dir)))
@@ -389,11 +408,21 @@ class SiteBuilder:
         if problems:
             raise BuildError("ロケールの対応づけに問題がある: " + "; ".join(problems[:5]))
         seen: set[str] = set()
+        ledger = LastmodLedger.load(ws.state_dir / "lastmod.json") if self.track_lastmod else None
+        today = to_jst(self.now).date()
+        lastmods: dict[str, date] = {}
         for page in pages:
             if page.meta.path in seen:
                 raise BuildError(f"ページのパスが重複: {page.meta.path}")
             seen.add(page.meta.path)
             html = self.render_page(page)
+            if ledger is not None and _in_sitemap(page):
+                lastmods[page.meta.path] = ledger.update(
+                    page.meta.path,
+                    html,
+                    today=today,
+                    first_seen=to_jst(page.trust.updated_at).date(),
+                )
             out = dist / page.meta.path
             out.parent.mkdir(parents=True, exist_ok=True)
             out.write_text(html, encoding="utf-8", newline="\n")
@@ -421,7 +450,12 @@ class SiteBuilder:
                 path.write_text(dumps(payload, indent=None), encoding="utf-8", newline="\n")
                 result.files.append(rel)
 
-        self._write(dist / "sitemap.xml", self._sitemap(pages))
+        self._write(dist / "sitemap.xml", self._sitemap(pages, lastmods))
+        if ledger is not None:
+            ledger.save()
+            result.lastmod_changed = ledger.changed
+            result.lastmod_added = ledger.added
+            result.lastmod_kept = ledger.kept
         self._write(
             dist / "robots.txt",
             f"User-agent: *\nAllow: /\nSitemap: {ws.site.base_url}/sitemap.xml\n",
@@ -457,14 +491,16 @@ class SiteBuilder:
     def _write(self, path: Any, text: str) -> None:
         path.write_text(text, encoding="utf-8", newline="\n")
 
-    def _sitemap(self, pages: list[Page]) -> str:
+    def _sitemap(self, pages: list[Page], lastmods: dict[str, date] | None = None) -> str:
         base = self.ws.site.base_url
         multilingual = self.ws.site.multilingual
         rows = []
         for p in pages:
-            if p.meta.noindex or not p.meta.path.endswith(".html"):
+            if not _in_sitemap(p):
                 continue
-            lastmod = p.trust.updated_at.astimezone(JST).date().isoformat()
+            recorded = (lastmods or {}).get(p.meta.path)
+            day = recorded or p.trust.updated_at.astimezone(JST).date()
+            lastmod = day.isoformat()
             # 多言語のときは各言語版を url の中で示す（検索エンジンの推奨する書き方）
             alts = "".join(
                 f'<xhtml:link rel="alternate" hreflang="{link["hreflang"]}" href="{link["href"]}"/>'

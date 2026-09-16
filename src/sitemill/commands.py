@@ -363,9 +363,13 @@ def cmd_finalize(rt: Runtime) -> RunReport:
 
 def cmd_build(rt: Runtime) -> RunReport:
     report = new_report(rt.service.id, "build")
-    result = SiteBuilder(rt.ws, rt.service).build()
+    result = SiteBuilder(rt.ws, rt.service, track_lastmod=True).build()
     report.bump("build", "pages", result.pages)
     report.bump("build", "files", len(result.files))
+    # lastmod（ADR 0025）。changed が毎日ほぼ全ページなら、日付で変わる表示に印が付いていない
+    report.bump("build", "lastmod_changed", result.lastmod_changed)
+    report.bump("build", "lastmod_added", result.lastmod_added)
+    report.bump("build", "lastmod_kept", result.lastmod_kept)
     report.notes.extend(result.warnings)
     save_report(rt.ws.runs_dir, report)
     return report
