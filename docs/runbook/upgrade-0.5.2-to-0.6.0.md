@@ -1,7 +1,14 @@
 # akiya-atlas を sitemill v0.5.2 から v0.6.0 に上げる
 
-akiya-atlas のセッションが読む手順。japan-open-today は 2026-09-17 に v0.5.0 → v0.6.0 に上げ済み
-（`6a919a5`）。
+akiya-atlas のセッションが読む手順。japan-open-today は 2026-09-17 に v0.5.0 → v0.6.0 → **v0.6.1** に上げ済み
+（`6a919a5`、`477771a`）。
+
+**v0.6.1 に直接上げてよい**（手順は同じで、`ref:` を `v0.6.1` にする）。v0.6.0 との差は 2 つ:
+- 週次の Search Console の節に「インデックスされなかった理由」（画面と同じ表記・件数・1 週間前との差・例）と
+  「転送の確認（www・http の形）」が出る。日次の `sitemill search fetch` が `data/search/index/states.json` と
+  `variants.json` を書くようになり、URL 検査が 1 日 3 件増える（sitemill ADR 0023 追記）。
+  **日次でコミットする `data/search` のパスは変えなくてよい**（同じディレクトリの中に増えるだけ）
+- もしもの貼り付けをカード単位で切る修正（下の「もしもの読み取り」）
 
 ## 何が変わるか（v0.5.2 → v0.6.0）
 
