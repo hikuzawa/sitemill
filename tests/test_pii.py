@@ -57,6 +57,36 @@ def test_name_detection_and_stoplist() -> None:
     assert scan_text("お客様各位", policy=policy) == []
 
 
+def test_role_words_with_an_honorific_are_not_names() -> None:
+    """役割を指す一般名詞に敬称が付く形は氏名ではない。
+
+    自治体の補助制度の説明に普通に出る（「天城町新婚さん応援生活補助金」「大家さんまたは
+    入居者に補助します」）。実在の氏名はこれまでどおり検出する。
+    """
+    policy = default_jp_gov_policy()
+    for text in (
+        "天城町新婚さん応援生活補助金",
+        "大家さんまたは入居者に補助します",
+        "分譲住宅地を造成する業者さんへ",
+        "所有者さんの同意が要ります",
+    ):
+        assert scan_text(text, policy=policy) == [], text
+    assert _kinds("大家の田中さんに連絡", policy=policy) == ["name"]
+
+
+def test_a_label_followed_by_an_amount_is_not_a_name() -> None:
+    """「所有者: 5万円」は誰にいくら払うかの説明で、氏名ではない。"""
+    policy = default_jp_gov_policy()
+    for text in (
+        "所有者:5万円、購入者:10万円",
+        "売主: 5万円、買主: 15万円",
+        "所有者：リフォーム工事の1/3に相当する額",
+        "所有者: 家財処分費の2/3に相当する額又は30万円",
+    ):
+        assert scan_text(text, policy=policy) == [], text
+    assert _kinds("所有者: 佐藤一郎", policy=policy) == ["name"]  # 氏名は従来どおり
+
+
 def test_allow_also_whitelists_operator_contact() -> None:
     base = default_jp_gov_policy()
     policy = allow_also(base, emails=["support@akiya-atlas.example"], phones=["03-1234-5678"])

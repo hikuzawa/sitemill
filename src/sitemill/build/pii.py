@@ -37,6 +37,12 @@ _ORG_SUFFIX = re.compile(
     r"神社|寺院|教会|役所|役場|支店|本店|本社|支部|事務所|事業団|公社|公団|商会|"
     r"組|会|社|団|局|部|課|店|館|園|寺|宮)$"
 )
+# 敬称が付く一般名詞・役割語。これで終わる「◯◯さん」は氏名ではない
+# （「天城町新婚さん応援生活補助金」「大家さんまたは入居者に」など、自治体の制度名と説明に出る）
+_ROLE_SUFFIX = re.compile(r"(?:新婚|大家|業者|事業者|所有者|入居者|申請者|相談員|管理人)$")
+# 「所有者: 5万円」のように、ラベルの後ろが金額や割合なら氏名ではない。
+# 補助制度の説明は「誰にいくら」を並べて書くので、この形が普通に出る
+_NOT_A_NAME = re.compile(r"[0-9０-９]|円|割|%|％|分の")
 _NAME_STOP = {
     "皆様",
     "皆さん",
@@ -170,10 +176,12 @@ def scan_text(text: str, *, policy: PiiPolicy | None = None, where: str = "") ->
             continue
         if _ORG_SUFFIX.search(name):
             continue  # 「◯◯記念財団様」は団体宛の敬称で、氏名ではない
+        if _ROLE_SUFFIX.search(name):
+            continue  # 「大家さん」「新婚さん」は役割を指す一般名詞
         findings.append(PiiFinding("name", whole, _snippet(scan, m.start(), m.end()), where))
     for m in LABEL_RE.finditer(scan):
         value = m.group(2).strip()
-        if value and value not in _NAME_STOP:
+        if value and value not in _NAME_STOP and not _NOT_A_NAME.search(value):
             snippet = _snippet(scan, m.start(), m.end())
             findings.append(PiiFinding("name", f"{m.group(1)}: {value}", snippet, where))
     return findings
