@@ -116,6 +116,12 @@ _NO_VALUE = re.compile(r"[-–—―ー−‐]+|なし|未定|非公開|不明|�
 _STATUS = re.compile(
     r"未提携|未申請|提携申請中|提携中|提携済み?|申請中|申請可能|審査中|審査待ち|即時提携|提携可能"
 )
+# もしもの一覧の案件カードは「案件名 → サイト → 成果 N円 → 提携状況」で始まり、そのあと同じ案件名を
+# もう一度置いてから成果条件・可否の札が続く。「サイト」はカードの列見出しで、
+# **直前の行が次の案件の名前**。ここで切らないと先頭の 4 行が 1 つ前の案件の原文に付き、
+# 種別の判定が次の案件の語に引きずられる（akiya-atlas の実データで 31 件中 28 件。
+# WordPress テーマが「片付け」、建築士講座が「リフォーム」）
+_CARD_START = re.compile(r"サイト")
 # 成果報酬の欄に条件と金額が同居する ASP がある（A8「新規査定申込20000円」）。金額を外した残りが条件
 _AMOUNT = re.compile(r"\d[\d,]*(?:\.\d+)?\s*(?:億|万|千)?\s*(?:円|%|ポイント|pt)?")
 _HAS_WORD = re.compile(r"[一-龥ぁ-んァ-ヴー]")
@@ -148,7 +154,7 @@ _STRICT_ALIASES = {"成果"}
 # 成果条件が**見出しの側**にある書き方。A8 の「成果条件 ○○」とは前後が逆で、
 # もしもは「お問い合わせ完了後: 5,000円」と、条件を見出しに・金額を値に置く
 _CONDITION_AMOUNT = re.compile(
-    r"^(?P<cond>[^:：]{2,40}?)\s*[:：]\s*(?P<amount>\d[\d,]*(?:\.\d+)?\s*(?:円|%|％|ポイント|pt))$"
+    r"^(?P<cond>[^:：]{2,80}?)\s*[:：]\s*(?P<amount>\d[\d,]*(?:\.\d+)?\s*(?:円|%|％|ポイント|pt))$"
 )
 
 _IMMEDIATE = re.compile(r"即時|自動|無審査|提携済|提携中|提携可能")
@@ -190,7 +196,7 @@ def _split_records(text: str) -> list[_Record]:
     cur = _Record()
     pending: list[str] = []  # 直近の、ラベルの無い行の連なり
 
-    def start_new(*, hand_over: bool = True) -> None:
+    def start_new(*, hand_over: bool = True, head_lines: int = _HEAD_LINES) -> None:
         """今の案件を閉じ、直前のラベル無し行の末尾を次の案件の見出しとして渡す。
 
         最後の項目より後ろの行は、見出しに使う 2 行を除いてどちらの案件にも入れない。
@@ -200,7 +206,7 @@ def _split_records(text: str) -> list[_Record]:
         nonlocal cur, pending
         if cur.seen:
             records.append(cur)
-        head = pending[-_HEAD_LINES:] if hand_over else []
+        head = pending[-head_lines:] if hand_over else []
         cur = _Record(head=head, lines=list(head))
         pending = []
 
@@ -214,11 +220,23 @@ def _split_records(text: str) -> list[_Record]:
         if _SEPARATOR.fullmatch(line):
             start_new(hand_over=False)  # 貼る人が入れた区切り。手前の行は前の案件のもの
             continue
+        if _CARD_START.fullmatch(line) and pending:
+            # カードの始まり。直前の 1 行だけが案件名で、それより前は前のカードの後ろの画面部品
+            start_new(head_lines=1)
+            cur.lines.append(line)
+            continue
+        # 提携状況の行（「未申請」）は、同じ案件の「審査あり」と項目が重なる。別の印で数えないと
+        # 1 案件の中で「提携の項目が二度目」になり、そこで割れる
+        status_line = _STATUS.fullmatch(line) is not None
         pairs, head, i, tiered = _read_line(lines, start)
         if head:
             pending.append(head)
         if not pairs:
             continue
+        if pending and cur.head and pending[-1] == cur.head[0]:
+            # 同じ案件名がもう一度出た（もしもはカードの中で名前を繰り返す）。次の案件ではない
+            cur.lines += pending
+            pending = []
         if tiered:
             # 成果条件が見出しの側にある行。同じ案件の中で何度も出る（報酬が段階に分かれている
             # と「お問い合わせ完了後: 5,000円」「成約後: 20,000円」と並ぶ）ので、
@@ -236,7 +254,8 @@ def _split_records(text: str) -> list[_Record]:
             cur.lines += [ln for ln in lines[start:i] if ln]
             continue
         for name, value in pairs:
-            if name in cur.seen:
+            key = "status" if status_line else name
+            if key in cur.seen:
                 start_new()  # 同じ項目が二度目 = 次の案件
             elif pending:
                 if cur.head:
@@ -246,7 +265,7 @@ def _split_records(text: str) -> list[_Record]:
                     cur.head = pending[-_HEAD_LINES:]
                     cur.lines = list(cur.head)
                 pending = []
-            cur.seen.add(name)
+            cur.seen.add(key)
             if value:
                 cur.fields.setdefault(name, value)  # 同じ項目が二度出たら先に出た方
         cur.lines += [ln for ln in lines[start:i] if ln]

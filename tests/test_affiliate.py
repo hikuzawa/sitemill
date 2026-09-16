@@ -465,3 +465,54 @@ def test_the_result_count_heading_is_screen_furniture():
     """「検索結果 31件」は件数を連れている。全体一致で見るので後ろまで含めて捨てる。"""
     rows = parse_offers("検索結果 31件\n案件A\n成果 1,000円\n再訪問 30日\n")
     assert [c.name for c in rows] == ["案件A"]
+
+
+MOSHIMO_CARDS = Path(__file__).parent / "fixtures" / "affiliate" / "asp-list-moshimo-cards.txt"
+
+
+@pytest.fixture
+def moshimo_cards():
+    """もしもの実際の並び: 案件名 → サイト → 成果 → 提携状況 → 案件名（再掲）→ 成果条件 → 札。
+
+    案件名は架空。並びと画面部品は akiya-atlas の実データ（31 件）と同じ。
+    """
+    return parse_offers(MOSHIMO_CARDS.read_text(encoding="utf-8"), asp="moshimo")
+
+
+def test_a_card_starts_at_its_name_not_at_the_repeated_name(moshimo_cards):
+    """先頭の 4 行（名前 → サイト → 成果 → 提携状況）が、前の案件の原文に付かない。
+
+    付くと種別が次の案件の語で決まる（WordPress テーマが「片付け」になった）。
+    """
+    assert [c.name for c in moshimo_cards] == [
+        "サンプルテーマ|WordPress(ワードプレス)テーマの新規購入",
+        "サンプル片付け便|【1件10,000円】空き家片付けの契約",
+        "サンプル研修|業務自動化トレーニングの無料申込完了",
+    ]
+    names = [c.name for c in moshimo_cards]
+    for card in moshimo_cards:
+        others = [n for n in names if n != card.name]
+        assert not any(n in card.raw for n in others), card.name
+    assert "片付け" not in moshimo_cards[0].raw
+
+
+def test_the_repeated_name_and_the_review_line_do_not_split_a_card(moshimo_cards):
+    """カードの中で名前が二度出る。「未申請」と「審査あり」は同じ提携の項目だが、1 件のまま。"""
+    assert len(moshimo_cards) == 3
+    first = moshimo_cards[0]
+    assert first.raw.startswith("サンプルテーマ|") and "サイト" in first.raw
+    assert first.cookie_days == 90
+    assert first.review_required is True  # 未申請
+
+
+def test_the_card_fields_stay_with_their_own_card(moshimo_cards):
+    assert [c.reward_yen for c in moshimo_cards] == [None, 10000, 15000]
+    assert [c.cookie_days for c in moshimo_cards] == [90, 60, 30]
+    assert moshimo_cards[2].review_required is False  # 提携中
+
+
+def test_a_long_condition_on_the_label_side_is_read_as_the_condition(moshimo_cards):
+    """「公式LINEもしくは申込フォームから…の予約完了: 15,000円」は 40 字を超える。名前にしない。"""
+    last = moshimo_cards[2]
+    assert last.condition.startswith("公式LINEもしくは申込フォームから")
+    assert "表示中" not in last.raw  # 次のページの見出しは入らない
