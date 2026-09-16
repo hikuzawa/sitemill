@@ -112,9 +112,7 @@ def test_days_outside_the_window_are_kept(tmp_path: Path) -> None:
         [Fact(date(2026, 8, 1), ("https://x/old",), 1, 10, 0.1, 5.0)],
         replace_days={date(2026, 8, 1)},
     )
-    console = FakeConsole(
-        {("date", "page"): [_row("2026-09-10", "https://x/a", 0, 5, 40.0)]}, {}
-    )
+    console = FakeConsole({("date", "page"): [_row("2026-09-10", "https://x/a", 0, 5, 40.0)]}, {})
     fetch_performance(console, store, days=1, today=date(2026, 9, 10))
     days = {f.day for f in store.read("page")}
     assert days == {date(2026, 8, 1), date(2026, 9, 10)}
@@ -220,11 +218,16 @@ def test_the_report_leads_with_how_indexing_is_going(tmp_path: Path) -> None:
     )
     store.write_urls(
         {
-            "https://x/a": {"verdict": "PASS", "coverage_state": "Submitted and indexed",
-                            "checked_on": "2026-09-14"},
-            "https://x/b": {"verdict": "NEUTRAL",
-                            "coverage_state": "Discovered - currently not indexed",
-                            "checked_on": "2026-09-14"},
+            "https://x/a": {
+                "verdict": "PASS",
+                "coverage_state": "Submitted and indexed",
+                "checked_on": "2026-09-14",
+            },
+            "https://x/b": {
+                "verdict": "NEUTRAL",
+                "coverage_state": "Discovered - currently not indexed",
+                "checked_on": "2026-09-14",
+            },
         },
         checked_at=datetime(2026, 9, 14, 9, 0),
     )
@@ -249,3 +252,120 @@ def test_the_report_dates_itself_in_japan_time(
     monkeypatch.setattr(module, "jst_today", lambda: date(2026, 9, 14))
     summary = summarise(SearchStore(tmp_path), days=7)
     assert summary.end == date(2026, 9, 14)
+
+
+# --- インデックスされなかった理由の内訳 ---------------------------------------
+
+
+def _urls(store: SearchStore, rows: dict[str, tuple[str, str]], day: str = "2026-09-17") -> None:
+    """URL → (状態, Google の選んだ正規ページ)。"""
+    store.write_urls(
+        {
+            url: {
+                "verdict": "PASS" if state == "Submitted and indexed" else "NEUTRAL",
+                "coverage_state": state,
+                "google_canonical": canonical,
+                "last_crawl": "2026-09-15T00:00:00Z",
+                "checked_on": day,
+            }
+            for url, (state, canonical) in rows.items()
+        },
+        checked_at=datetime(2026, 9, 17, 9, 0),
+    )
+
+
+def test_inspection_keeps_one_count_row_per_day(tmp_path: Path) -> None:
+    """週の比較に使う件数は日ごとに 1 行。同じ日に取り込み直しても増えない。"""
+    store = SearchStore(tmp_path)
+    console = FakeConsole({}, {"https://x/a": "Submitted and indexed"})
+    urls = ["https://x/a", "https://x/b"]
+    inspect_urls(console, store, urls, limit=2, now=datetime(2026, 9, 17, 9, 0))
+    inspect_urls(console, store, urls, limit=2, now=datetime(2026, 9, 17, 21, 0))
+    history = store.read_state_history()
+    assert list(history) == ["2026-09-17"]
+    assert history["2026-09-17"] == {"Submitted and indexed": 1, "URL is unknown to Google": 1}
+
+
+def test_the_reasons_are_listed_in_search_consoles_words_with_examples(tmp_path: Path) -> None:
+    store = SearchStore(tmp_path)
+    _urls(
+        store,
+        {
+            "https://x/ok": ("Submitted and indexed", ""),
+            "https://x/a": ("Discovered - currently not indexed", ""),
+            "https://x/b": ("Discovered - currently not indexed", ""),
+            "https://x/c": ("Crawled - currently not indexed", ""),
+            "https://x/d": ("Duplicate, Google chose different canonical than user", "https://x/e"),
+        },
+    )
+    text = markdown(summarise(store, site_urls=["https://x/ok"], today=date(2026, 9, 17)))
+    assert "インデックスされなかった理由" in text
+    assert "| 検出 - インデックス未登録 | 2 | — |" in text
+    assert "| クロール済み - インデックス未登録 | 1 | — |" in text
+    assert "https://x/d → https://x/e" in text  # 重複は Google の選んだ正規ページを添える
+    # 登録済みは例にしない
+    assert "https://x/ok" not in text.split("インデックスされなかった理由")[1]
+    assert "比較は次回から出ます" in text
+
+
+def test_the_reasons_compare_with_a_week_before(tmp_path: Path) -> None:
+    store = SearchStore(tmp_path)
+    store.write_state_counts(date(2026, 9, 9), {"Discovered - currently not indexed": 9})
+    store.write_state_counts(date(2026, 9, 12), {"Discovered - currently not indexed": 5})
+    _urls(store, {"https://x/a": ("Discovered - currently not indexed", "")})
+    summary = summarise(store, site_urls=["https://x/a"], today=date(2026, 9, 17))
+    # 7 日前（09-10）以前で一番近い日と比べる。09-12 は 1 週間経っていないので使わない
+    assert summary.index.previous_day == "2026-09-09"
+    assert "| 検出 - インデックス未登録 | 1 | -8 |" in markdown(summary)
+
+
+def test_the_report_says_when_nothing_was_left_out(tmp_path: Path) -> None:
+    store = SearchStore(tmp_path)
+    _urls(store, {"https://x/a": ("Submitted and indexed", "")})
+    text = markdown(summarise(store, site_urls=["https://x/a"], today=date(2026, 9, 17)))
+    assert "検査したページはすべて登録済みです" in text
+
+
+def test_host_variants_are_the_www_and_http_forms() -> None:
+    from sitemill.search import host_variants
+
+    assert host_variants("https://example.com") == [
+        "http://example.com/",
+        "https://www.example.com/",
+        "http://www.example.com/",
+    ]
+    assert host_variants("https://www.example.com/") == [
+        "http://www.example.com/",
+        "https://example.com/",
+        "http://example.com/",
+    ]
+
+
+def test_the_redirect_check_tells_expected_from_unexpected(tmp_path: Path) -> None:
+    """画面の「ページにリダイレクトがあります」は www・http の形。
+
+    転送として数えられていれば想定どおり。
+    """
+    from sitemill.search import inspect_variants
+
+    store = SearchStore(tmp_path)
+    console = FakeConsole(
+        {},
+        {
+            "http://example.com/": "Submitted and indexed",
+            "https://www.example.com/": "Page with redirect",
+            "http://www.example.com/": "Crawled - currently not indexed",
+        },
+    )
+    inspect_variants(console, store, "https://example.com", now=datetime(2026, 9, 17, 9, 0))
+    assert set(store.read_variants()) == set(console.asked)
+    _urls(store, {"https://example.com/": ("Submitted and indexed", "")})
+    text = markdown(summarise(store, site_urls=["https://example.com/"], today=date(2026, 9, 17)))
+    lines = {
+        ln.split(":", 2)[0] + ":" + ln.split(":", 2)[1]: ln
+        for ln in text.splitlines()
+        if ln.startswith("- http")
+    }
+    assert "転送として数えられている（想定どおり）" in lines["- https://www.example.com/"]
+    assert "本来の URL と同じページ" in lines["- http://example.com/"]
+    assert "**転送として扱われていない" in lines["- http://www.example.com/"]

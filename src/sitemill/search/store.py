@@ -4,6 +4,8 @@
 
     performance/<粒度>/<YYYY-MM>.jsonl   検索パフォーマンス。粒度は query / page / page_query
     index/urls.json                      URL 検査の結果（URL ごとに最後の 1 回）
+    index/states.json                    状態ごとの件数を日ごとに 1 行（週の比較に使う）
+    index/variants.json                  www・http の形の URL 検査（転送の確認）
     index/sitemaps.json                  サイトマップの状態（取得のたびに追記）
 
 **日付ごとに上書きする**。Search Console の数字は 2〜3 日遅れて確定するので、毎日「直近 5 日」を
@@ -154,6 +156,52 @@ class SearchStore:
             newline="\n",
         )
         return self.sitemaps_path
+
+    @property
+    def states_path(self) -> Path:
+        return self.root / "index" / "states.json"
+
+    def read_state_history(self) -> dict[str, dict[str, int]]:
+        """日付 → 状態ごとの件数。"""
+        if not self.states_path.is_file():
+            return {}
+        data = json.loads(self.states_path.read_text(encoding="utf-8"))
+        return {day: dict(counts) for day, counts in data.get("days", {}).items()}
+
+    def write_state_counts(self, day: date, counts: dict[str, int]) -> Path:
+        """その日の件数を置き換える（同じ日に何度取り込んでも 1 行）。"""
+        history = self.read_state_history()
+        history[day.isoformat()] = dict(sorted(counts.items()))
+        self.states_path.parent.mkdir(parents=True, exist_ok=True)
+        self.states_path.write_text(
+            json.dumps({"days": dict(sorted(history.items()))}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+            newline="\n",
+        )
+        return self.states_path
+
+    @property
+    def variants_path(self) -> Path:
+        return self.root / "index" / "variants.json"
+
+    def read_variants(self) -> dict[str, dict[str, Any]]:
+        if not self.variants_path.is_file():
+            return {}
+        data = json.loads(self.variants_path.read_text(encoding="utf-8"))
+        return dict(data.get("urls", {}))
+
+    def write_variants(self, urls: dict[str, dict[str, Any]], *, checked_at: datetime) -> Path:
+        self.variants_path.parent.mkdir(parents=True, exist_ok=True)
+        self.variants_path.write_text(
+            json.dumps(
+                {"checked_at": checked_at.isoformat(), "urls": dict(sorted(urls.items()))},
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+            newline="\n",
+        )
+        return self.variants_path
 
     def read_sitemaps(self) -> dict[str, Any]:
         if not self.sitemaps_path.is_file():

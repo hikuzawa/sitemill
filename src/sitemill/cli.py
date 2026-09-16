@@ -485,7 +485,7 @@ def search_fetch(
 
     日次のパイプラインから呼ぶ。直近の数日を取り直すので、遅れて確定した数字も後から埋まる。
     """
-    from sitemill.search import fetch_performance, fetch_sitemaps, inspect_urls
+    from sitemill.search import fetch_performance, fetch_sitemaps, inspect_urls, inspect_variants
 
     rt = _runtime(root)
     cfg = rt.ws.site.search_console
@@ -510,6 +510,11 @@ def search_fetch(
             typer.echo(f"URL 検査: {len(done.checked)} 件（{states}）")
             for line in done.failed[:5]:
                 typer.echo(f"  ! {line}", err=True)
+            variants = inspect_variants(console, store, rt.ws.site.base_url)
+            seen = "／".join(
+                f"{u} {v.get('coverage_state') or v.get('error', '?')}" for u, v in variants.items()
+            )
+            typer.echo(f"転送の確認: {seen}")
         typer.echo(f"（{console.request_count} リクエスト）")
 
 

@@ -8,7 +8,9 @@ from sitemill.search.client import SearchConsole, SearchConsoleError, load_servi
 from sitemill.search.collect import (
     fetch_performance,
     fetch_sitemaps,
+    host_variants,
     inspect_urls,
+    inspect_variants,
     pick_urls,
     sitemap_urls,
 )
@@ -23,7 +25,9 @@ __all__ = [
     "Summary",
     "fetch_performance",
     "fetch_sitemaps",
+    "host_variants",
     "inspect_urls",
+    "inspect_variants",
     "load_service_account",
     "markdown",
     "pick_urls",

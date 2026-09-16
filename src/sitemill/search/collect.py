@@ -133,15 +133,7 @@ def inspect_urls(
         except Exception as e:  # noqa: BLE001 - 1 件の失敗で全体を止めない
             result.failed.append(f"{url}: {e}")
             continue
-        status = inspection.get("indexStatusResult", {})
-        known[url] = {
-            "verdict": status.get("verdict", ""),
-            "coverage_state": status.get("coverageState", ""),
-            "last_crawl": status.get("lastCrawlTime", ""),
-            "google_canonical": status.get("googleCanonical", ""),
-            "robots": status.get("robotsTxtState", ""),
-            "checked_on": stamp.date().isoformat(),
-        }
+        known[url] = _index_status(inspection, stamp)
         result.checked.append(url)
         state = known[url]["coverage_state"] or "（状態なし）"
         result.states[state] = result.states.get(state, 0) + 1
@@ -149,4 +141,54 @@ def inspect_urls(
     alive = set(urls)
     known = {u: v for u, v in known.items() if u in alive}
     store.write_urls(known, checked_at=stamp)
+    # 週ごとの比較のために、サイト全体の状態ごとの件数を日付つきで残す
+    counts: dict[str, int] = {}
+    for v in known.values():
+        state = v.get("coverage_state") or "（状態なし）"
+        counts[state] = counts.get(state, 0) + 1
+    store.write_state_counts(stamp.date(), counts)
     return result
+
+
+def _index_status(inspection: dict[str, Any], stamp: datetime) -> dict[str, Any]:
+    status = inspection.get("indexStatusResult", {})
+    return {
+        "verdict": status.get("verdict", ""),
+        "coverage_state": status.get("coverageState", ""),
+        "last_crawl": status.get("lastCrawlTime", ""),
+        "google_canonical": status.get("googleCanonical", ""),
+        "robots": status.get("robotsTxtState", ""),
+        "checked_on": stamp.date().isoformat(),
+    }
+
+
+def host_variants(base_url: str) -> list[str]:
+    """トップページの www・http の形。
+
+    Search Console の「ページにリダイレクトがあります」の多くはこれ。
+    ドメインプロパティは http と www も含むので、Google はこれらを見つけて 301 を数える。
+    サイトマップの URL だけを検査していると、この理由の中身が見えない（2026-09-17 に確かめた）。
+    """
+    host = base_url.split("//", 1)[-1].split("/", 1)[0]
+    bare = host.removeprefix("www.")
+    other = bare if host.startswith("www.") else f"www.{bare}"
+    return [f"http://{host}/", f"https://{other}/", f"http://{other}/"]
+
+
+def inspect_variants(
+    console: SearchConsole,
+    store: SearchStore,
+    base_url: str,
+    *,
+    now: datetime | None = None,
+) -> dict[str, dict[str, Any]]:
+    """www・http の形を検査する。転送が Google に「転送」と認識されているかを見るため。"""
+    stamp = now or jst_now()
+    checked: dict[str, dict[str, Any]] = {}
+    for url in host_variants(base_url):
+        try:
+            checked[url] = _index_status(console.inspect(url), stamp)
+        except Exception as e:  # noqa: BLE001 - 1 件の失敗で全体を止めない
+            checked[url] = {"error": str(e)[:200], "checked_on": stamp.date().isoformat()}
+    store.write_variants(checked, checked_at=stamp)
+    return checked

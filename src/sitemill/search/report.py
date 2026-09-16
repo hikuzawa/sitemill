@@ -3,7 +3,8 @@
 出すもの:
 
 1. **インデックスの進み具合** — サイトマップの送信数と、URL 検査で「登録済み」と分かった数。
-   最初の数週間はこれが一番知りたい数字なので先頭に置く
+   最初の数週間はこれが一番知りたい数字なので先頭に置く。**登録されなかった理由の内訳**
+   （Search Console の表記・件数・先週比・例）と、www・http の転送が転送として数えられているか
 2. 検索パフォーマンスの合計と前の期間との差
 3. 表示が多いのに CTR が低いページ
 4. 順位が落ちたページ
@@ -33,6 +34,53 @@ MIN_IMPRESSIONS_FOR_RANK = 10
 TOP_N = 10
 # 「登録済み」と読める URL 検査の状態
 INDEXED_VERDICT = "PASS"
+# 理由ごとに出す例の数
+EXAMPLES = 3
+
+# URL 検査の状態（API の表記）→ Search Console の画面の表記と、読み方。
+# **Search Console API は「ページのインデックス作成」レポートの件数を返さない**。ここで数えるのは
+# 自分で URL 検査した分（サイトマップの URL）なので、画面の件数とは一致しないことがある
+COVERAGE_LABELS: dict[str, tuple[str, str]] = {
+    "Submitted and indexed": ("送信して登録済み", ""),
+    "Indexed, not submitted in sitemap": ("登録済み（サイトマップ未送信）", ""),
+    "Discovered - currently not indexed": (
+        "検出 - インデックス未登録",
+        "URL は知られているがまだクロールされていない。新しいサイトでは普通で、待つ",
+    ),
+    "Crawled - currently not indexed": (
+        "クロール済み - インデックス未登録",
+        "クロールしたうえで登録を見送った。内容が薄い・似たページが多いと起きやすい。"
+        "増え続けるなら例のページの中身を見る",
+    ),
+    "URL is unknown to Google": (
+        "Google がまだ知らない URL",
+        "画面のレポートには出ない、URL 検査だけの状態。サイトマップの再取得を待つ",
+    ),
+    "Page with redirect": (
+        "ページにリダイレクトがあります",
+        "サイトマップの URL が転送している。サイト内リンクかサイトマップを直す",
+    ),
+    "Duplicate, Google chose different canonical than user": (
+        "重複（Google が別のページを正規ページに選択）",
+        "例の矢印の先が Google の選んだ正規ページ。内容が重なっていないか見る",
+    ),
+    "Duplicate without user-selected canonical": (
+        "重複（正規ページの指定なし）",
+        "canonical が無いか読まれていない",
+    ),
+    "Alternate page with proper canonical tag": (
+        "適切な canonical タグ付きの代替ページ",
+        "意図どおりなら問題ない",
+    ),
+    "Excluded by ‘noindex’ tag": ("「noindex」タグによって除外", "意図どおりか確かめる"),
+    "Not found (404)": (
+        "見つかりませんでした（404）",
+        "サイトマップに消えたページが残っていないか",
+    ),
+    "Soft 404": ("ソフト 404", "中身の無いページになっていないか"),
+    "Blocked by robots.txt": ("robots.txt によりブロック", "robots.txt を直す"),
+    "Server error (5xx)": ("サーバーエラー（5xx）", "配置先の障害を確かめる"),
+}
 
 
 @dataclass
@@ -61,6 +109,13 @@ class IndexSummary:
     inspected: int = 0  # 検査できた URL 数
     indexed: int = 0  # そのうち登録済み
     states: dict[str, int] = field(default_factory=dict)
+    # 理由ごとの例（URL、重複なら「URL → Google の選んだ正規ページ」）
+    examples: dict[str, list[str]] = field(default_factory=dict)
+    # 1 週間前（以前で一番近い日）の状態ごとの件数。無ければ空
+    previous_day: str = ""
+    previous_states: dict[str, int] = field(default_factory=dict)
+    # www・http の形の検査結果（転送の確認）
+    variants: dict[str, dict[str, str]] = field(default_factory=dict)
     oldest_check: str = ""
     newest_check: str = ""
 
@@ -194,11 +249,13 @@ def summarise(
     }
     summary.new_queries = sorted(q for q in now_q if q not in before_q)[:TOP_N]
 
-    summary.index = index_summary(store, site_urls or [])
+    summary.index = index_summary(store, site_urls or [], today=end)
     return summary
 
 
-def index_summary(store: SearchStore, site_urls: list[str]) -> IndexSummary:
+def index_summary(
+    store: SearchStore, site_urls: list[str], *, today: date | None = None
+) -> IndexSummary:
     out = IndexSummary(site_urls=len(site_urls))
     stored = store.read_sitemaps()
     for row in stored.get("sitemaps", []):
@@ -217,9 +274,92 @@ def index_summary(store: SearchStore, site_urls: list[str]) -> IndexSummary:
     for v in urls.values():
         states[v.get("coverage_state") or "（状態なし）"] += 1
     out.states = dict(sorted(states.items(), key=lambda kv: -kv[1]))
+    # 例は最近クロールされたものから（古い状態より、いまの Google の判断に近い）
+    ordered = sorted(
+        urls.items(), key=lambda kv: (str(kv[1].get("last_crawl") or ""), kv[0]), reverse=True
+    )
+    for url, v in ordered:
+        if v.get("verdict") == INDEXED_VERDICT:
+            continue
+        state = v.get("coverage_state") or "（状態なし）"
+        picked = out.examples.setdefault(state, [])
+        if len(picked) < EXAMPLES:
+            chosen = v.get("google_canonical") or ""
+            picked.append(f"{url} → {chosen}" if chosen and chosen != url else url)
     if checks:
         out.oldest_check, out.newest_check = min(checks), max(checks)
+
+    history = store.read_state_history()
+    if today is not None and history:
+        week_ago = (today - timedelta(days=7)).isoformat()
+        older = [day for day in history if day <= week_ago]
+        if older:
+            out.previous_day = max(older)
+            out.previous_states = history[out.previous_day]
+    out.variants = {
+        url: {k: str(val) for k, val in v.items()} for url, v in store.read_variants().items()
+    }
     return out
+
+
+def _label(state: str) -> str:
+    return COVERAGE_LABELS.get(state, (state, ""))[0]
+
+
+def _not_indexed_section(idx: IndexSummary) -> list[str]:
+    """登録されなかった理由の内訳。Search Console の画面と同じ表記で、件数・先週比・例を出す。"""
+    reasons = {st: n for st, n in idx.states.items() if st in idx.examples}
+    lines = ["#### インデックスされなかった理由（URL 検査で数えた分）", ""]
+    if not reasons:
+        lines += ["検査したページはすべて登録済みです。", ""]
+        return lines
+    since = f"{idx.previous_day} 比" if idx.previous_day else "先週比"
+    lines.append(f"| 理由（Search Console の表記） | 件数 | {since} |")
+    lines.append("| --- | ---: | ---: |")
+    for state, n in reasons.items():
+        change = f"{n - idx.previous_states.get(state, 0):+,}" if idx.previous_day else "—"
+        lines.append(f"| {_label(state)} | {n:,} | {change} |")
+    lines.append("")
+    if not idx.previous_day:
+        lines += ["先週の記録がまだ無いので、比較は次回から出ます。", ""]
+    for state in reasons:
+        note = COVERAGE_LABELS.get(state, ("", ""))[1]
+        lines.append(f"- **{_label(state)}**" + (f" — {note}" if note else ""))
+        for example in idx.examples[state]:
+            lines.append(f"  - {example}")
+    lines += [
+        "",
+        "Search Console API は画面の「ページのインデックス作成」の件数を返さない。"
+        "ここはサイトマップの URL を自分で検査して数えたもので、画面の件数と一致しないことがある。",
+        "",
+    ]
+    return lines
+
+
+def _variants_section(idx: IndexSummary) -> list[str]:
+    """www・http の形が「転送」として数えられているか。画面の「リダイレクト」の中身。"""
+    lines = ["#### 転送の確認（www・http の形）", ""]
+    for url, v in idx.variants.items():
+        if v.get("error"):
+            lines.append(f"- {url}: 検査できなかった（{v['error'][:80]}）")
+            continue
+        state = v.get("coverage_state", "")
+        if state == "Page with redirect":
+            verdict = "転送として数えられている（想定どおり）"
+        elif v.get("verdict") == INDEXED_VERDICT:
+            verdict = "本来の URL と同じページとして扱われている（想定どおり）"
+        elif state == "URL is unknown to Google":
+            verdict = "Google はまだ見つけていない"
+        else:
+            verdict = "**転送として扱われていない。配置の転送設定を確かめる**"
+        lines.append(f"- {url}: {_label(state) or '状態なし'} — {verdict}")
+    lines += [
+        "",
+        "画面の「ページにリダイレクトがあります」は、主にこの www・http の形。"
+        "サイトマップの URL に転送が無ければ、対応は要らない。",
+        "",
+    ]
+    return lines
 
 
 def _pct(value: float) -> str:
@@ -267,11 +407,13 @@ def markdown(summary: Summary, *, title: str = "検索の状況（Search Console
         )
         if idx.oldest_check:
             lines.append(f"  - 検査した日: {idx.oldest_check} 〜 {idx.newest_check}")
-        for state, n in idx.states.items():
-            lines.append(f"  - {state}: {n:,}")
     else:
         lines.append("- URL 検査: まだ 1 ページも検査していません")
     lines.append("")
+    if idx.inspected:
+        lines += _not_indexed_section(idx)
+    if idx.variants:
+        lines += _variants_section(idx)
 
     lines.append(f"### 検索パフォーマンス（{s.start:%m-%d} 〜 {s.end:%m-%d}、{s.days} 日間）")
     lines.append("")
