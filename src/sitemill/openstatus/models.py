@@ -39,6 +39,9 @@ class ReasonCode(StrEnum):
     conflicting = "conflicting"  # 規則と告知、または告知同士が食い違う
     stale_source = "stale_source"  # 一次情報の取得が途切れている
     holiday_unknown = "holiday_unknown"  # その年の祝日が分からない
+    # 原文の規則を、いまの規則の形で表しきれない（「第 2・4 水曜日に開館」など）。
+    # 表せる形に丸めると別の日に開いていると断定してしまうので、不明にする
+    rule_unsupported = "rule_unsupported"
     no_data = "no_data"  # 材料が無い
 
 
