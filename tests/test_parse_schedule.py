@@ -205,6 +205,33 @@ def test_single_date_is_a_one_day_span() -> None:
     assert note == "single_day"
 
 
+def test_a_japanese_era_year_is_read_not_replaced_by_this_year() -> None:
+    """「R7年」「令和7年」は 2025 年。読まないと去年の休業を今年の休業にする（2026-09-17）。"""
+    span, _ = parse_date_range("R7年11月11日(火)~11月20日(木)", year=2026)
+    assert span == (date(2025, 11, 11), date(2025, 11, 20))
+    span, _ = parse_date_range("令和7年10月29日", year=2026)
+    assert span == (date(2025, 10, 29), date(2025, 10, 29))
+    span, _ = parse_date_range("令和8年9月14日~18日", year=2026)
+    assert span == (date(2026, 9, 14), date(2026, 9, 18))
+
+
+def test_the_weekday_decides_the_year_when_none_is_written() -> None:
+    """「10月1日(水)」は 2026 年なら木曜。曜日が合う年（前年・今年・翌年のどれか 1 つ）を採る。"""
+    span, _ = parse_date_range("10月1日(水)", year=2026)
+    assert span == (date(2025, 10, 1), date(2025, 10, 1))
+    span, _ = parse_date_range("9/16(水)~9/18(金)", year=2026)
+    assert span == (date(2026, 9, 16), date(2026, 9, 18))
+    span, _ = parse_date_range("1月5日(火)", year=2026)  # 年末に翌年の告知を読む
+    assert span == (date(2027, 1, 5), date(2027, 1, 5))
+
+
+def test_a_written_year_that_contradicts_the_weekday_is_not_a_date() -> None:
+    span, note = parse_date_range("2026年10月1日(水)", year=2026)
+    assert span is None and note == "weekday_mismatch"
+    span, note = parse_date_range("2026年9月14日(月)〜9月18日(木)", year=2026)
+    assert span is None and note == "weekday_mismatch"  # 18 日は金曜
+
+
 def test_specific_dates() -> None:
     days, _ = parse_specific_dates("9月15日・9月16日", year=2026)
     assert days == (date(2026, 9, 15), date(2026, 9, 16))
