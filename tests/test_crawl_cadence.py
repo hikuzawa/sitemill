@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import sys
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from pathlib import Path
 
 import httpx
@@ -19,6 +19,7 @@ from sitemill.diff.state import CrawlState, UrlState
 from sitemill.fetch.client import PoliteClient
 from sitemill.fetch.crawler import crawl_source
 from sitemill.models import CrawlPolicy, OperatorEvidence, OperatorKind, SeedPage, Source
+from sitemill.models.core import utcnow
 from sitemill.store import RawCache
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -27,7 +28,9 @@ from tests.dummy_service import DummyService, make_workspace  # noqa: E402
 HOURS_URL = "https://spot.example/hours/"
 NOTICE_URL = "https://spot.example/news/"
 PAGE = "<html><body><main><h1>{title}</h1><p>10:00〜17:00</p></main></body></html>"
-NOW = datetime(2026, 9, 12, 21, 0, tzinfo=UTC)
+# 「いま」は実際の時計から数える。固定の日付にすると、その日から 7 日（max_interval_days）
+# 過ぎた時点で「昨日取得した」が「8 日前に取得した」になり、テストが勝手に落ちる
+NOW = utcnow()
 
 
 def _source() -> Source:

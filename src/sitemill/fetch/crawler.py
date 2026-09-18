@@ -103,6 +103,9 @@ def crawl_source(
         # キャッシュが状態の指す本文と違えば、ETag を付けない。付けると 304 が返り、
         # 古い本文を新しい content_hash の本文として読んでしまう（RawCache.matches_state）
         stale_cache = cached is not None and not raw.matches_state(source.id, url, st.content_hash)
+        if stale_cache:
+            # どの URL で起きたかを残す。件数だけだと、1 件になったときに調べる手がかりが無い
+            log.warning("生 HTML のキャッシュが巡回状態より古い。条件を付けずに取り直す: %s", url)
         use_conditional = cached is not None and not stale_cache and not force
         result = client.get(
             url,

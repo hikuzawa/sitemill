@@ -289,3 +289,12 @@ def test_extract_does_not_read_a_cache_older_than_the_state(rt: commands.Runtime
 
     state = CrawlState.load(rt.state_path)
     assert state.get("https://akiya.example/bukken/2").pending_extract  # type: ignore[union-attr]
+
+    # 次の巡回は条件を付けずに取り直す。そのとき「どの URL だったか」を実行レポートに残す
+    respx.get("https://akiya.example/bukken/2").mock(
+        return_value=httpx.Response(200, text=DETAIL.format(n=2, price="980"))
+    )
+    again = commands.cmd_crawl(rt, force=True)
+    assert again.stages["crawl"]["stale_cache"] == 1
+    note = next(n for n in again.notes if "キャッシュが巡回状態より古く" in n)
+    assert "https://akiya.example/bukken/2" in note

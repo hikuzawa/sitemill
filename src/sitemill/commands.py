@@ -172,6 +172,15 @@ def cmd_crawl(
             for page in summary.pages:
                 if page.error and not page.not_modified:
                     report.errors.append(f"{page.url}: {page.error}")
+        # キャッシュが古くて取り直した URL を実行レポートに残す。件数だけでは、1 件になった
+        # ときにどのページだったか分からない（ADR 0024 追記）。多いときは頭の 10 件だけ
+        stale = [p.url for summary in summaries for p in summary.pages if p.stale_cache]
+        if stale:
+            shown = ", ".join(stale[:10])
+            more = f" ほか {len(stale) - 10} 件" if len(stale) > 10 else ""
+            report.notes.append(
+                f"キャッシュが巡回状態より古く、条件を付けずに取り直した: {shown}{more}"
+            )
         report.bump("crawl", "requests", client.request_count)
         report.bump("crawl", "workers", workers)
     save_report(rt.ws.runs_dir, report)
