@@ -118,3 +118,61 @@ def test_sitemill_build_records_lastmod_and_reports_it(rt: commands.Runtime) -> 
     assert (rt.ws.state_dir / "lastmod.json").is_file()
     stages = report.stages["build"]
     assert stages["lastmod_added"] >= 1 and stages["lastmod_changed"] == 0
+
+
+def test_changing_the_templates_relearns_the_fingerprints_and_keeps_the_dates(
+    tmp_path: Path,
+) -> None:
+    """見た目を変えた回は、指紋を作り直して日付を据え置く。
+
+    指紋はテンプレートが描いた HTML から作るので、テンプレートを変えると全ページの指紋が変わる。
+    そのまま比べると翌日の実行で全ページが「今日変わった」になり、lastmod の意味が消える
+    （akiya-atlas は取得時刻に印を付けただけで 5,717 ページの指紋が変わった）。
+    """
+    from sitemill.build.lastmod import layout_key
+
+    templates = tmp_path / "templates"
+    templates.mkdir()
+    (templates / "spot.html").write_text("<main>{{ spot }}</main>", encoding="utf-8")
+    before = layout_key(templates)
+
+    ledger = LastmodLedger.load(tmp_path / "lastmod.json", layout=before)
+    ledger.update("a.html", _page(), today=date(2026, 9, 17), first_seen=date(2026, 9, 17))
+    ledger.save()
+
+    (templates / "spot.html").write_text(
+        "<main>{{ spot }}<p data-sitemill-volatile>取得 {{ day }}</p></main>", encoding="utf-8"
+    )
+    after = layout_key(templates)
+    assert after != before
+
+    ledger = LastmodLedger.load(tmp_path / "lastmod.json", layout=after)
+    assert ledger.relearn
+    day = ledger.update(
+        "a.html", _page(items="<li>c</li>"), today=date(2026, 9, 19), first_seen=date(2026, 9, 19)
+    )
+    assert day == date(2026, 9, 17)  # 日付は据え置き
+    assert ledger.relearned == 1 and ledger.changed == 0
+    ledger.save()
+
+    # 作り直した後は、これまでどおり中身の変化で日付が進む
+    ledger = LastmodLedger.load(tmp_path / "lastmod.json", layout=after)
+    assert not ledger.relearn
+    moved = ledger.update(
+        "a.html", _page(items="<li>d</li>"), today=date(2026, 9, 20), first_seen=date(2026, 9, 20)
+    )
+    assert moved == date(2026, 9, 20) and ledger.changed == 1
+
+
+def test_a_ledger_written_before_the_layout_key_is_not_relearned(tmp_path: Path) -> None:
+    """鍵を持たない台帳（この仕組みより前のもの）は作り直さない。鍵を書き足すだけ。"""
+    ledger = LastmodLedger.load(tmp_path / "lastmod.json")
+    ledger.update("a.html", _page(), today=date(2026, 9, 17), first_seen=date(2026, 9, 17))
+    ledger.save()
+
+    ledger = LastmodLedger.load(tmp_path / "lastmod.json", layout="sha256:new")
+    assert not ledger.relearn
+    day = ledger.update(
+        "a.html", _page(items="<li>c</li>"), today=date(2026, 9, 19), first_seen=date(2026, 9, 19)
+    )
+    assert day == date(2026, 9, 19) and ledger.changed == 1

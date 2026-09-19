@@ -379,6 +379,7 @@ def cmd_build(rt: Runtime) -> RunReport:
     report.bump("build", "lastmod_changed", result.lastmod_changed)
     report.bump("build", "lastmod_added", result.lastmod_added)
     report.bump("build", "lastmod_kept", result.lastmod_kept)
+    report.bump("build", "lastmod_relearned", result.lastmod_relearned)
     report.notes.extend(result.warnings)
     save_report(rt.ws.runs_dir, report)
     return report

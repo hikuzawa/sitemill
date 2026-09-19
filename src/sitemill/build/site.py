@@ -20,7 +20,7 @@ from jinja2 import (
 from markupsafe import Markup
 
 from sitemill.build import preflight
-from sitemill.build.lastmod import LastmodLedger
+from sitemill.build.lastmod import LastmodLedger, layout_key
 from sitemill.build.pii import PiiPolicy, allow_also, default_jp_gov_policy, scan_text
 from sitemill.build.trust import verify_page_html
 from sitemill.charts import Chart
@@ -61,6 +61,8 @@ class BuildResult:
     lastmod_changed: int = 0
     lastmod_added: int = 0
     lastmod_kept: int = 0
+    # 見た目が変わったので、指紋を作り直して日付を据え置いたページ
+    lastmod_relearned: int = 0
 
 
 # --- Jinja フィルタ ---------------------------------------------------------
@@ -408,7 +410,14 @@ class SiteBuilder:
         if problems:
             raise BuildError("ロケールの対応づけに問題がある: " + "; ".join(problems[:5]))
         seen: set[str] = set()
-        ledger = LastmodLedger.load(ws.state_dir / "lastmod.json") if self.track_lastmod else None
+        ledger = (
+            LastmodLedger.load(
+                ws.state_dir / "lastmod.json",
+                layout=layout_key(ws.templates_dir),
+            )
+            if self.track_lastmod
+            else None
+        )
         today = to_jst(self.now).date()
         lastmods: dict[str, date] = {}
         for page in pages:
@@ -456,6 +465,14 @@ class SiteBuilder:
             result.lastmod_changed = ledger.changed
             result.lastmod_added = ledger.added
             result.lastmod_kept = ledger.kept
+            result.lastmod_relearned = ledger.relearned
+            if ledger.relearned:
+                # 見た目を変えた回は、台帳を作り直して日付を据え置く（ADR 0025 追記）。
+                # 事実を増やす変更だったなら、次の実行で日付が進む
+                result.warnings.append(
+                    f"テンプレートが変わったので lastmod の指紋を作り直し、"
+                    f"{ledger.relearned} ページの日付を据え置いた"
+                )
         self._write(
             dist / "robots.txt",
             f"User-agent: *\nAllow: /\nSitemap: {ws.site.base_url}/sitemap.xml\n",
