@@ -1,6 +1,6 @@
 [project]
 name = "sitemill"
-version = "0.7.3"
+version = "0.7.4"
 description = "公的・公式サイトを監視→差分検知→構造化→静的サイト生成→デプロイ→計測する共通エンジン"
 readme = "README.md"
 requires-python = ">=3.12"
