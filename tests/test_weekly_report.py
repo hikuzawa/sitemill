@@ -65,7 +65,8 @@ def test_the_table_adds_up_time_cost_and_heal(ws: Workspace) -> None:
     assert rows[1].cost(weekly.price_of("claude-haiku-4-5")) == pytest.approx(2.0)
 
     text = "\n".join(weekly.report(ws, days=7, now=datetime(2026, 9, 12, tzinfo=UTC)))
-    assert "1 か月の見込み" in text and "無料枠" in text
+    # public リポジトリでは Actions の無料枠を消費しないので、枠との比較は出さない
+    assert "1 か月の見込み" in text and "無料枠" not in text
     assert "自己修復（heal）: 点検 3 件" in text
 
 

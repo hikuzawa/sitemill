@@ -24,8 +24,6 @@ PRICES: dict[str, tuple[float, float]] = {
     "claude-sonnet-5": (3.0, 15.0),
     "claude-opus-5": (15.0, 75.0),
 }
-# GitHub Actions の無料枠（private リポジトリ、Free プラン）。月の見込みと比べる
-FREE_MINUTES_PER_MONTH = 2000
 
 
 def _dt(value: str | None) -> datetime | None:
@@ -140,7 +138,7 @@ def price_of(model: str) -> tuple[float, float] | None:
 
 
 def month_estimate(rows: list[DayRow], price: tuple[float, float]) -> dict[str, float]:
-    """1 か月に直した見込み（Actions の無料枠と比べる）。"""
+    """1 か月に直した見込み（実行時間と費用）。"""
     if not rows:
         return {"minutes": 0.0, "cost": 0.0}
     days = len(rows)
@@ -215,13 +213,13 @@ def report(
         f"**{total_cost}** | {total.heal_checked} | — |"
     )
     estimate = month_estimate(rows, price or (0.0, 0.0))
-    share = estimate["minutes"] / FREE_MINUTES_PER_MONTH * 100
+    # Actions の無料枠（月 2,000 分）とは比べない。public リポジトリの実行は枠を消費しないので、
+    # 「無料枠の n%」は意味を持たない（2026-09-21。両サービスとも public）
     out += [
         "",
         f"- 1 日あたり: {total.seconds / len(rows) / 60:.1f} 分"
         + (f" / ${total.cost(price) / len(rows):.2f}" if price else ""),
         f"- 1 か月の見込み: **{estimate['minutes']:.0f} 分**"
-        f"（Actions の無料枠 {FREE_MINUTES_PER_MONTH:,} 分の {share:.0f}%）"
         + (f" / **${estimate['cost']:.2f}**" if price else ""),
         f"- 自己修復（heal）: 点検 {total.heal_checked} 件 / 変更 {total.heal_changed} 件 / "
         f"取り下げ {total.heal_downgraded} 件 / 再巡回 {total.heal_recrawl} 件",
