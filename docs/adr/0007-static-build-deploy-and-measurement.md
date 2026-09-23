@@ -16,3 +16,24 @@
 ## 影響
 - 検索はサーバー無しで動くよう、静的 JSON 索引＋クライアント側フィルタにする
 - Node（wrangler）は CI にだけ必要。エンジン本体は Python だけで動く
+
+## 追記（2026-09-23）: 表示数の読み取りをエンジンに置く
+
+2 つのサービス（akiya-atlas、japan-open-today）の `tools/report_clicks.py` が、Cloudflare の
+GraphQL への同じ問い合わせをそれぞれ持っていた。配置ルールでは計測はエンジン側なので、
+`sitemill.metrics.rum_pageloads(secrets, host, days)` に寄せる。返すのは「パス → 表示数」の
+辞書だけで、どのパスを何の名前で並べるか（akiya-atlas は案件 × 枠、japan-open-today は
+飛び先 × 言語）と、動作確認で開いた分の差し引きはサービス側に残す。
+
+決めたこと:
+
+- **絞り込みは `siteTag` ではなくホスト名（`requestHost`）**。同じホスト名で Web Analytics の
+  登録が 2 つあると、HTML に挿し込まれている `data-cf-beacon` の token 側にイベントが 1 件も
+  入らないことがある（japan-open-today で発生）。ホスト名ならどちらに入っていても取れる
+- 必要な権限は **Account Analytics: Read**（配置用の権限だけでは 403）
+- 鍵・権限・通信のいずれかが欠ければ `None` を返し、週次の集計は止めない。足りないものの案内は
+  `sitemill.metrics.rum.NEED`
+- 自動挿入のビーコンは**ブラウザのナビゲーションと同じ形の要求**にだけ入る。素の `fetch()` や
+  `curl` の HTML には入らないので、`data-cf-beacon` の有無で計測を判定すると必ず「無い」と出る。
+  `Accept: text/html` と `Sec-Fetch-Mode: navigate`（`NAVIGATION_HEADERS`）を付ければ入る。
+  利用者側の UA は関係ない。同じ理由で、そうやって開いた分は表示数にも出ない
