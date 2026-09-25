@@ -10,7 +10,8 @@
   `embeds/` 地図・SNS 埋め込み、`i18n/` 多言語（ロケール・文言カタログ・ロケール別書式）、
   `clock.py` 日本時間、`jpcal/` 祝日、`openstatus/` 「その日開いているか」の判定、
   `deploy/` デプロイ、`metrics/` 実行レポートと抽出精度、`store/` JSON/JSONL の永続化
-- `metrics/weekly.py` 日次パイプラインの週次まとめ（実行時間・費用・heal・抽出の充足率）。
+- `metrics/weekly.py` 日次パイプラインの週次まとめ（実行時間・費用・heal・抽出の充足率・
+  robots.txt で見送り続けているホスト）。
   `sitemill runs report --days 7`。サービス固有の項目はサービス側で足す
 - `search/` Search Console の取り込みと集計（ADR 0023）。`sitemill search fetch|report|properties`。
   鍵は `.env` の `GOOGLE_SEARCH_CONSOLE_KEY`（サービスアカウントの JSON を base64 にした 1 行）

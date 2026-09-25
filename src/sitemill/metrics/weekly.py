@@ -11,10 +11,12 @@ akiya-atlas が先に持っていた同名の仕組みを、サービスに依�
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from sitemill.settings import Workspace
 
@@ -24,6 +26,15 @@ PRICES: dict[str, tuple[float, float]] = {
     "claude-sonnet-5": (3.0, 15.0),
     "claude-opus-5": (15.0, 75.0),
 }
+
+# robots.txt のせいで巡回できない日がこれだけ続いたら、ホスト名を出す
+# （その情報源の更新が止まっている）
+ROBOTS_STALE_DAYS = 3
+# 巡回を見送った理由のうち robots.txt によるもの。エンジン（fetch.robots / fetch.client）は
+# 「取得できない」「robots.txt 202: 今回は巡回しない」のような異常な応答、
+# 「robots.txt により拒否」の 3 通りを書く。どれも続けばその情報源の更新は止まるので、まとめて拾う
+ROBOTS_MARK = "robots.txt"
+ROBOTS_STALLED_NOTE = "この情報源の掲載は更新が止まっている"
 
 
 def _dt(value: str | None) -> datetime | None:
@@ -228,6 +239,7 @@ def report(
     ]
     if not price:
         out.append(f"- 費用: モデル {model} の単価が未登録（`metrics/weekly.py` の PRICES）")
+    out += robots_lines(*robots_failures(ws, days=days, now=now, source=source))
 
     shifts = field_shift(rows)
     if shifts:
@@ -240,6 +252,112 @@ def report(
             )
     elif any(r.fields for r in rows):
         out += ["", "抽出の充足率: 比べられる日が 1 日しかありません（変化は次回から出ます）"]
+    return out
+
+
+def _host(url: str) -> str:
+    return urlsplit(url).hostname or url
+
+
+def robots_reason(error: str) -> str:
+    """見送った理由を、打ち手が分かる言葉にする。"""
+    if "拒否" in error:
+        return "robots.txt で拒否。巡回先の URL を見直す"
+    m = re.search(r"robots\.txt (\d{3})", error)
+    if m:
+        return f"robots.txt が {m.group(1)} を返す。相手に当たり直す"
+    return "robots.txt を取得できない。相手に当たり直す"
+
+
+def robots_failures(
+    ws: Workspace, *, days: int = 7, now: datetime | None = None, source: str = "all"
+) -> tuple[list[str], int, list[tuple[str, int | None, str]]]:
+    """robots.txt のせいで巡回できなかったホスト。(ホスト一覧, 延べ回数, 止まっているホスト)。
+
+    robots.txt が読めない・拒否されていると、その回は巡回しない（正しい判断）。ただし**続くと
+    その情報源だけ静かに更新が止まる**。japan-open-today では CI から 2 ホストの robots.txt が
+    9/13 から毎晩時間切れになっていて、週次には出ていなかった（2026-09-26）。akiya-atlas が
+    先に持っていた仕組みを、サービスに依らない形でエンジンへ移したもの。
+
+    数と延べ回数は期間内の実行レポート（`*-crawl.json` の errors）から数える。止まっているか
+    どうかは実行レポートでは決められない（巡回間隔の適応で、その晩は対象外だったのか見送ったのかが
+    混ざる）ので、巡回の状態（`data/state/crawl.json`）にいま robots の理由が残っている URL を見て、
+    **最後に取得できた日からの日数**で判断する。`ROBOTS_STALE_DAYS` 日以上なら名前を出す。
+    一度も取得できていないホストは日数を None で返す。
+
+    エンジンが書く見送りの理由（取得できない・異常な応答・拒否）はすべて拾う。「取得できない」
+    だけを拾うと、robots.txt が 202 を返し続けるホストや、拒否されたページを巡回先にしている
+    情報源を見逃す（akiya-atlas で 2026-09-26 に起きた）。
+    """
+    now = now or datetime.now(UTC)
+    since = now - timedelta(days=days)
+    hosts: dict[str, int] = {}
+    for path in sorted(ws.runs_dir.glob("*-crawl.json")):
+        if path.name.startswith(("latest-", "backfill", "discover-")):
+            continue  # 直近の写しと手元の作業。二重に数えない
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        started = _dt(data.get("started_at"))
+        if started is None or started < since:
+            continue
+        is_ci = bool(data.get("ci"))
+        if (source == "ci" and not is_ci) or (source == "local" and is_ci):
+            continue
+        for err in data.get("errors") or []:
+            err = str(err)
+            if ROBOTS_MARK in err:
+                host = _host(err.split(": " + ROBOTS_MARK, 1)[0])
+                hosts[host] = hosts.get(host, 0) + 1
+
+    stalled: dict[str, tuple[int | None, str]] = {}
+    try:
+        state = json.loads((ws.state_dir / "crawl.json").read_text(encoding="utf-8")) or {}
+    except (OSError, json.JSONDecodeError):
+        state = {}
+    for url, st in (state.get("urls") or {}).items():
+        error = str((st or {}).get("error") or "")
+        if ROBOTS_MARK not in error:
+            continue
+        host = _host(url)
+        fetched = _dt(st.get("fetched_at"))
+        age = None if fetched is None else (now - fetched).days
+        known = stalled.get(host)
+        # 同じホストの中では、いちばん長く止まっている URL の日数を採る（None が最も長い）
+        if known is None or (known[0] is not None and (age is None or age > known[0])):
+            stalled[host] = (age, robots_reason(error))
+    named = sorted(
+        (
+            (h, age, reason)
+            for h, (age, reason) in stalled.items()
+            if age is None or age >= ROBOTS_STALE_DAYS
+        ),
+        key=lambda row: (row[1] is not None, -(row[1] or 0), row[0]),
+    )
+    return sorted(hosts), sum(hosts.values()), named
+
+
+def robots_lines(
+    hosts: list[str],
+    times: int,
+    stalled: list[tuple[str, int | None, str]],
+    *,
+    note: str = ROBOTS_STALLED_NOTE,
+) -> list[str]:
+    """週次に出す行。1 晩だけの見送りは数だけ、続いているものは名前と理由つきで。
+
+    `note` は止まっていることの意味をサービスの言葉で書く（akiya-atlas なら「この自治体の
+    掲載は更新が止まっている」）。
+    """
+    if not hosts and not stalled:
+        return ["- robots.txt で巡回できなかったホスト: なし"]
+    out = [f"- robots.txt で巡回できなかったホスト: **{len(hosts)}**（延べ {times} 回）"]
+    if stalled:
+        out.append(f"  - **{ROBOTS_STALE_DAYS} 日以上取得できていない**（{note}）")
+        for host, age, reason in stalled:
+            since = "一度も取得できていない" if age is None else f"最終取得から {age} 日"
+            out.append(f"    - {host}（{since}）: {reason}")
     return out
 
 

@@ -100,3 +100,67 @@ def test_local_runs_are_not_counted_as_the_daily_pipeline(ws: Workspace) -> None
 def test_a_week_with_no_runs_says_so(ws: Workspace) -> None:
     text = "\n".join(weekly.report(ws, days=7, now=datetime(2026, 9, 12, tzinfo=UTC)))
     assert "この期間に記録がありません" in text
+
+
+NOW = datetime(2026, 9, 26, 12, tzinfo=UTC)
+SKIP = "robots.txt を取得できないため今回は巡回しない"
+
+
+def _state(ws: Workspace, urls: dict[str, dict[str, object]]) -> None:
+    ws.state_dir.mkdir(parents=True, exist_ok=True)
+    (ws.state_dir / "crawl.json").write_text(
+        json.dumps({"version": 1, "urls": urls}, ensure_ascii=False), encoding="utf-8"
+    )
+
+
+def test_a_host_skipped_for_days_is_named_with_its_reason(ws: Workspace) -> None:
+    """9/13 から毎晩 robots.txt が時間切れのホストは、週次に名前つきで出る。"""
+    for day in ("2026-09-20", "2026-09-22", "2026-09-24"):
+        _run(ws, "crawl", day, errors=[f"https://teshima.example/: {SKIP}"])
+    _run(ws, "crawl", "2026-09-25", errors=[f"https://once.example/p: {SKIP}"])
+    _state(
+        ws,
+        {
+            "https://teshima.example/": {"error": SKIP, "fetched_at": "2026-09-12T23:15:56Z"},
+            # 1 晩だけの失敗は数には入るが、名前は出さない
+            "https://once.example/p": {"error": SKIP, "fetched_at": "2026-09-24T23:00:00Z"},
+            "https://fine.example/": {"error": None, "fetched_at": "2026-09-25T23:00:00Z"},
+        },
+    )
+    hosts, times, stalled = weekly.robots_failures(ws, days=7, now=NOW)
+    assert hosts == ["once.example", "teshima.example"]
+    assert times == 4
+    assert stalled == [("teshima.example", 13, "robots.txt を取得できない。相手に当たり直す")]
+
+    text = "\n".join(weekly.report(ws, days=7, now=NOW))
+    assert "robots.txt で巡回できなかったホスト: **2**（延べ 4 回）" in text
+    assert "teshima.example（最終取得から 13 日）" in text
+    assert "once.example（" not in text
+
+
+def test_every_robots_reason_counts_not_only_a_timeout(ws: Workspace) -> None:
+    """202 を返し続けるホストと、拒否されたページを巡回先にしている情報源も拾う。"""
+    _state(
+        ws,
+        {
+            "https://odd.example/": {
+                "error": "robots.txt 202: 今回は巡回しない",
+                "fetched_at": "2026-09-16T00:00:00Z",
+            },
+            "https://deny.example/search?q=x": {"error": "robots.txt により拒否"},
+        },
+    )
+    _, _, stalled = weekly.robots_failures(ws, days=7, now=NOW)
+    assert stalled == [
+        ("deny.example", None, "robots.txt で拒否。巡回先の URL を見直す"),
+        ("odd.example", 10, "robots.txt が 202 を返す。相手に当たり直す"),
+    ]
+    lines = weekly.robots_lines([], 0, stalled, note="この自治体の掲載は更新が止まっている")
+    assert "deny.example（一度も取得できていない）" in "\n".join(lines)
+    assert "（この自治体の掲載は更新が止まっている）" in lines[1]
+
+
+def test_no_robots_trouble_says_none(ws: Workspace) -> None:
+    assert weekly.robots_lines(*weekly.robots_failures(ws, days=7, now=NOW)) == [
+        "- robots.txt で巡回できなかったホスト: なし"
+    ]
