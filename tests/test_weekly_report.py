@@ -164,3 +164,18 @@ def test_no_robots_trouble_says_none(ws: Workspace) -> None:
     assert weekly.robots_lines(*weekly.robots_failures(ws, days=7, now=NOW)) == [
         "- robots.txt で巡回できなかったホスト: なし"
     ]
+
+
+def test_a_url_dropped_from_the_seeds_stops_being_named(ws: Workspace) -> None:
+    """巡回先から外した URL の失敗は、外したあとまで「止まっている」と出し続けない。"""
+    _state(
+        ws,
+        {
+            "https://dropped.example/search?q=x": {"error": "robots.txt により拒否"},
+            "https://kept.example/": {"error": SKIP, "fetched_at": "2026-09-12T00:00:00Z"},
+        },
+    )
+    _, _, everything = weekly.robots_failures(ws, days=7, now=NOW)
+    assert [h for h, _, _ in everything] == ["dropped.example", "kept.example"]
+    _, _, current = weekly.robots_failures(ws, days=7, now=NOW, seeds={"https://kept.example/"})
+    assert [h for h, _, _ in current] == ["kept.example"]

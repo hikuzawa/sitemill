@@ -37,3 +37,7 @@ robots.txt が取れない・異常な応答を返す・拒否しているとき
 akiya-atlas が先に `weekly.py` に持っていたものを、同じ引数・戻り値のままエンジンに移した
 （`robots_failures(ws, days=, now=)` と `robots_lines(hosts, times, stalled, note=)`。
 止まっていることの意味はサービスの言葉で `note` に渡す）。
+
+v0.7.8 で、止まっているかの判断を**いまの巡回先にある URL だけ**で行うようにした（`seeds`。
+`runs report` はサービスの `sources()` から渡す）。巡回先から外した URL の状態は巡回されないまま残るので、
+外したあとまで「止まっている」と出し続けていた（akiya-atlas が当麻町の検索 URL を外したときに足した絞り込み）。

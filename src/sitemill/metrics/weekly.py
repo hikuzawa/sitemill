@@ -185,8 +185,12 @@ def report(
     now: datetime | None = None,
     source: str = "ci",
     model: str = "",
+    seeds: set[str] | None = None,
 ) -> list[str]:
-    """報告用の行（Markdown）。数字が無い日があっても表は出す。"""
+    """報告用の行（Markdown）。数字が無い日があっても表は出す。
+
+    `seeds` はいまの巡回先の URL（`robots_failures` に渡す。None なら絞り込まない）。
+    """
     rows = collect(ws, days=days, now=now, source=source)
     model = model or ws.site.llm.model
     price = price_of(model)
@@ -239,7 +243,7 @@ def report(
     ]
     if not price:
         out.append(f"- 費用: モデル {model} の単価が未登録（`metrics/weekly.py` の PRICES）")
-    out += robots_lines(*robots_failures(ws, days=days, now=now, source=source))
+    out += robots_lines(*robots_failures(ws, days=days, now=now, source=source, seeds=seeds))
 
     shifts = field_shift(rows)
     if shifts:
@@ -270,7 +274,12 @@ def robots_reason(error: str) -> str:
 
 
 def robots_failures(
-    ws: Workspace, *, days: int = 7, now: datetime | None = None, source: str = "all"
+    ws: Workspace,
+    *,
+    days: int = 7,
+    now: datetime | None = None,
+    source: str = "all",
+    seeds: set[str] | None = None,
 ) -> tuple[list[str], int, list[tuple[str, int | None, str]]]:
     """robots.txt のせいで巡回できなかったホスト。(ホスト一覧, 延べ回数, 止まっているホスト)。
 
@@ -284,6 +293,10 @@ def robots_failures(
     混ざる）ので、巡回の状態（`data/state/crawl.json`）にいま robots の理由が残っている URL を見て、
     **最後に取得できた日からの日数**で判断する。`ROBOTS_STALE_DAYS` 日以上なら名前を出す。
     一度も取得できていないホストは日数を None で返す。
+
+    `seeds` を渡すと、止まっているかの判断はいま巡回先にある URL だけで行う。巡回先から外した URL の
+    状態は巡回されないまま残るので、外したあとまで「止まっている」と出し続けてしまう（akiya-atlas が
+    当麻町の検索 URL を外した 2026-09-26 に足した絞り込みを、エンジンへ移した）。
 
     エンジンが書く見送りの理由（取得できない・異常な応答・拒否）はすべて拾う。「取得できない」
     だけを拾うと、robots.txt が 202 を返し続けるホストや、拒否されたページを巡回先にしている
@@ -319,6 +332,8 @@ def robots_failures(
     for url, st in (state.get("urls") or {}).items():
         error = str((st or {}).get("error") or "")
         if ROBOTS_MARK not in error:
+            continue
+        if seeds is not None and url not in seeds:
             continue
         host = _host(url)
         fetched = _dt(st.get("fetched_at"))

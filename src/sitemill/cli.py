@@ -551,7 +551,12 @@ def runs_report(
     if source not in ("ci", "local", "all"):
         typer.echo("エラー: --source は ci / local / all のいずれか", err=True)
         raise typer.Exit(code=2)
-    for line in weekly.report(rt.ws, days=days, source=source):
+    try:
+        # いまの巡回先。外した URL の robots の失敗を「止まっている」と出し続けないため
+        seeds = {page.url for src in rt.service.sources(rt.ws) for page in src.pages} or None
+    except Exception:  # noqa: BLE001 - 情報源が読めなくても週次は止めない（絞り込まずに出す）
+        seeds = None
+    for line in weekly.report(rt.ws, days=days, source=source, seeds=seeds):
         typer.echo(line)
     if save:
         path = weekly.write_snapshot(rt.ws, days=days, source=source)
