@@ -6,6 +6,7 @@
     午前9時〜午後5時 / 9時〜17時30分
     平日 9:00〜17:00、土日祝 9:00〜18:00
     3月〜9月 9:00〜17:00 / 10月〜2月 9:00〜16:30
+    1月 7時00分~17時00分 / 2月 7時00分~17時30分 / …（月ごとの表。2 行以上）
     10:00-17:00（最終入館 16:30）
 
 読めない形は値にしない（None を返す）。月ごとに時間が変わる表などは、原文を引用として残したまま
@@ -41,6 +42,14 @@ _SEASON = re.compile(
 # 切る前に「3月21日〜10月20日」に書き換える（寒霞渓のロープウェイの営業時間表がこの形）
 _SLASH_SPAN = re.compile(
     rf"(?<![\d:])(\d{{1,2}})\s*/\s*(\d{{1,2}})\s*{DASH}\s*(\d{{1,2}})\s*/\s*(\d{{1,2}})(?![\d:])"
+)
+# 月ごとの時間の表（栗林公園「1月 7時00分~17時00分 / 2月 7時00分~17時30分 / …」）。
+# 単独の月の直後に時刻が来る行。「3月〜9月」の終わりの月と「4月1日」は除く。
+# 前処理で改行が空白になるため、行の区切りも季節も無いまま 12 個の時間帯が 1 つに混ざり、
+# その日の時間として全部並んでいた（2026-09-28）
+_MONTH_ROW = re.compile(
+    rf"(?<![\d〜~\-‐–—ー])(?P<m>1[0-2]|[1-9])\s*月(?!\s*\d{{1,2}}\s*日)(?!\s*{DASH})"
+    r"(?=\s*(?:午前|午後)?\s*\d{1,2}\s*(?::|時))"
 )
 # 役所の窓口・事務所・電話受付の時間。**施設の営業時間ではない**。
 # 自治体サイトのフッターにはほぼ必ず「開庁時間 8:30〜17:15」があり、市町の観光ページにも
@@ -120,6 +129,18 @@ def _slash_spans(text: str) -> str:
     return _SLASH_SPAN.sub(lambda m: f"\n{m[1]}月{m[2]}日〜{m[3]}月{m[4]}日 ", text)
 
 
+def _month_rows(text: str) -> str:
+    """月ごとの表の各行を「N月〜N月」の季節にし、行の頭を断片の境目にする。
+
+    2 行以上あるときだけ表とみなす。1 か所だけの「8月 9:00〜18:00」は、通常の時間との関係が
+    原文から決められない（上書きか、追加か）ので季節にしない。
+    """
+    rows = list(_MONTH_ROW.finditer(text))
+    if len({m.group("m") for m in rows}) < 2:
+        return text
+    return _MONTH_ROW.sub(lambda m: f"\n{m.group('m')}月〜{m.group('m')}月 ", text)
+
+
 def _season(text: str) -> tuple[AnnualSpan | None, str]:
     """季節の前置き（「3月〜9月」）を取り出し、残りの文字列を返す。"""
     m = _SEASON.search(text)
@@ -170,7 +191,7 @@ def parse_opening_hours(quote: str) -> tuple[list[HoursPeriod] | None, str | Non
     """
     if not quote or not quote.strip():
         return None, "no_text"
-    text = _drop_office_notes(_slash_spans(normalize_text(quote)))
+    text = _drop_office_notes(_month_rows(_slash_spans(normalize_text(quote))))
     if _ALWAYS_OPEN.search(text):
         # 「入園自由」「24時間」。時間帯は無いが**開いていることは分かる**ので値にする。
         # 時間が書かれていないだけの施設（unknown）と区別する

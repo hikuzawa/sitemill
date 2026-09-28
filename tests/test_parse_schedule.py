@@ -388,3 +388,30 @@ def test_a_reception_note_still_becomes_the_last_entry() -> None:
     value, _ = parse_opening_hours("10:00〜17:00（入館は16:30まで）")
     assert value is not None
     assert value[0].ranges[0].last_entry == time(16, 30)
+
+
+def test_a_month_by_month_table_becomes_one_season_per_month() -> None:
+    """栗林公園は月ごとの表。季節が無いまま 12 個の時間帯が 1 日に並んでいた（2026-09-28）。"""
+    quote = (
+        "1月 7時00分~17時00分\n2月 7時00分~17時30分\n3月 6時30分~18時00分\n"
+        "9月 5時30分~18時30分\n10月  6時00分~17時30分\n12月  7時00分~17時00分"
+    )
+    periods, note = parse_opening_hours(quote)
+    assert note is None and periods is not None
+    by_month = {p.season.start_month: p for p in periods if p.season is not None}
+    assert sorted(by_month) == [1, 2, 3, 9, 10, 12]
+    sept = by_month[9]
+    assert (sept.season.end_month, sept.season.start_day, sept.season.end_day) == (9, 1, 31)
+    assert [(r.start, r.end) for r in sept.ranges] == [(time(5, 30), time(18, 30))]
+
+
+def test_a_single_month_note_is_not_read_as_a_season() -> None:
+    """1 か所だけの「8月 9:00〜18:00」は、通常の時間を上書きするのか足すのか原文から決まらない。"""
+    periods, _ = parse_opening_hours("9:00〜17:00、8月 9:00〜18:00")
+    assert periods is not None
+    assert all(p.season is None for p in periods)
+
+
+def test_month_ranges_and_dates_are_left_as_they_were() -> None:
+    periods, _ = parse_opening_hours("3月〜9月 9:00〜17:00 / 10月〜2月 9:00〜16:30")
+    assert [(p.season.start_month, p.season.end_month) for p in periods or []] == [(3, 9), (10, 2)]
