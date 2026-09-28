@@ -10,6 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from sitemill.build.guard import GuardResult, run_guard
 from sitemill.build.site import SiteBuilder
 from sitemill.deploy import DeployPlan, deploy
 from sitemill.diff.schedule import IntervalPolicy, source_due
@@ -383,6 +384,26 @@ def cmd_build(rt: Runtime) -> RunReport:
     report.notes.extend(result.warnings)
     save_report(rt.ws.runs_dir, report)
     return report
+
+
+def cmd_guard(rt: Runtime, *, accept: bool = False) -> tuple[RunReport, GuardResult]:
+    """公開前の歯止め（ADR 0026）。判定の内訳が前回公開した値から急に悪くなっていれば止める。
+
+    サービスに `publish_metrics` / `publish_limits` が無ければ何もしない（通す）。
+    割合は 1 万分率の整数で実行レポートに残す（`stages` は整数だけを持つ）。
+    """
+    report = new_report(rt.service.id, "guard")
+    result = run_guard(rt.ws, rt.service, now=utcnow(), accept=accept)
+    for name, metric in result.values.items():
+        report.bump("guard", f"{name}_count", metric.count)
+        report.bump("guard", f"{name}_total", metric.total)
+        report.bump("guard", f"{name}_bp", round(metric.share * 10000))
+    report.bump("guard", "breaches", len(result.breaches))
+    report.errors.extend(result.breaches)
+    if result.accepted and result.breaches:
+        report.notes.append("しきい値を越えていたが、--accept で今の値を基準にした")
+    save_report(rt.ws.runs_dir, report)
+    return report, result
 
 
 def cmd_heal(rt: Runtime, source_ids: list[str] | None = None) -> RunReport:

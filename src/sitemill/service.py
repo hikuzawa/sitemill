@@ -34,6 +34,8 @@ class Service(Protocol):
       発見で詳細ページを足すサービスでは宣言しない（既定 False）
     - `pii_policy(ws)`: 公開前の個人情報検査のポリシー
     - `heal(ws, *, client, source_ids)`: 成果 0 件の source を選び直す自己修復
+    - `publish_metrics(ws, *, now)` と `publish_limits`: 公開前の歯止め（ADR 0026）。判定の内訳が
+      前回公開した値から急に悪くなったら `sitemill guard` が止める。しきい値には理由を書く
     """
 
     id: str

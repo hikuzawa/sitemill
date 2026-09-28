@@ -177,6 +177,32 @@ def build(root: RootOpt = None) -> None:
 
 
 @app.command()
+def guard(
+    root: RootOpt = None,
+    accept: Annotated[
+        bool,
+        typer.Option("--accept", help="越えていても今の値を基準にする（人が確かめたあと）"),
+    ] = False,
+) -> None:
+    """公開前の歯止め（ADR 0026）。判定の内訳が急に悪くなっていれば終了コード 6 で止める。"""
+    report, result = commands.cmd_guard(_runtime(root), accept=accept)
+    if not result.values:
+        typer.echo("サービスに publish_metrics / publish_limits が無いため検査しない")
+        return
+    for name, metric in sorted(result.values.items()):
+        before = result.baseline.get(name)
+        was = f"（前回公開 {float(before['share']):.1%}）" if before else "（前回公開の値なし）"
+        typer.echo(f"{name}: {metric.share:.1%}（{metric.count}/{metric.total}）{was}")
+    for line in result.breaches:
+        typer.echo(f"  ! {line}", err=True)
+    if result.breaches and not accept:
+        typer.echo("配置を止める（前日の本番を残す）。確かめて正当なら --accept", err=True)
+        raise typer.Exit(code=6)
+    for note in report.notes:
+        typer.echo(f"  - {note}")
+
+
+@app.command()
 def run(root: RootOpt = None, source: SourceOpt = None, workers: WorkersOpt = None) -> None:
     """crawl → extract → heal → build をまとめて実行する。"""
     rt = _runtime(root)
