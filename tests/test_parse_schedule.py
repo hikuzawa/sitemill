@@ -415,3 +415,14 @@ def test_a_single_month_note_is_not_read_as_a_season() -> None:
 def test_month_ranges_and_dates_are_left_as_they_were() -> None:
     periods, _ = parse_opening_hours("3月〜9月 9:00〜17:00 / 10月〜2月 9:00〜16:30")
     assert [(p.season.start_month, p.season.end_month) for p in periods or []] == [(3, 9), (10, 2)]
+
+
+def test_a_mixed_month_table_is_left_unseasoned() -> None:
+    """玉藻公園は「4、5月」「6~8月」と西門・東門が混ざる。単独の月だけ季節にすると誤った値になる。"""
+    quote = (
+        "西門\n4、5月 5:30~18:30\n6~8月 5:30~19:00\n9月 5:30~18:30\n10月 6:00~17:30\n"
+        "東門\n4~9月 7:00~18:00\n10~3月 8:30~17:00"
+    )
+    periods, _ = parse_opening_hours(quote)
+    assert periods is not None
+    assert all(p.season is None for p in periods)
