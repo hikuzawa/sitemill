@@ -24,6 +24,7 @@ from sitemill.metrics.evalcases import EvalResult, load_eval_cases, record_respo
 from sitemill.metrics.extraction import ExtractionMetrics
 from sitemill.metrics.reports import new_report, save_report
 from sitemill.models import ExtractorInfo, Provenance, RunReport, Source, utcnow
+from sitemill.recheck import rotate
 from sitemill.service import Service, check_crawl_gate, load_service
 from sitemill.settings import Workspace
 from sitemill.store.jsonio import read_jsonl, write_json
@@ -404,6 +405,45 @@ def cmd_guard(rt: Runtime, *, accept: bool = False) -> tuple[RunReport, GuardRes
         report.notes.append("しきい値を越えていたが、--accept で今の値を基準にした")
     save_report(rt.ws.runs_dir, report)
     return report, result
+
+
+def cmd_recheck(rt: Runtime, *, limit: int | None = None, workers: int = 1) -> RunReport:
+    """運営主体の根拠を、確認日の古い順に今夜の分だけ確かめ直す（ADR 0027）。
+
+    サービスが `recheck_targets(ws)` と `recheck_one(ws, target, client)` を持っていれば回す。
+    `recheck_reselect(ws, target, reason, client)` があれば、続けて成り立たなかったものを選び直す。
+    1 晩の件数はサービスの `recheck_per_night`（全件 ÷ 周期の日数）。
+    """
+    report = new_report(rt.service.id, "recheck")
+    targets_hook = getattr(rt.service, "recheck_targets", None)
+    check_hook = getattr(rt.service, "recheck_one", None)
+    if targets_hook is None or check_hook is None:
+        report.notes.append("サービスに recheck_targets / recheck_one が無いため何もしない")
+        save_report(rt.ws.runs_dir, report)
+        return report
+    reselect_hook = getattr(rt.service, "recheck_reselect", None)
+    per_night = limit or int(getattr(rt.service, "recheck_per_night", 0) or 0)
+    with rt.client() as client:
+        result = rotate(
+            rt.ws,
+            list(targets_hook(rt.ws)),
+            lambda target: check_hook(rt.ws, target, client),
+            per_night=per_night,
+            workers=workers,
+            reselect=(
+                (lambda target, reason: reselect_hook(rt.ws, target, reason, client))
+                if reselect_hook is not None
+                else None
+            ),
+        )
+        report.bump("recheck", "requests", client.request_count)
+    report.bump("recheck", "checked", result.checked)
+    for key, n in result.counts.items():
+        report.bump("recheck", key, n)
+    report.bump("recheck", "reselected", result.reselected)
+    report.notes.extend(result.lines)
+    save_report(rt.ws.runs_dir, report)
+    return report
 
 
 def cmd_heal(rt: Runtime, source_ids: list[str] | None = None) -> RunReport:

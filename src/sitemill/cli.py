@@ -177,6 +177,21 @@ def build(root: RootOpt = None) -> None:
 
 
 @app.command()
+def recheck(
+    root: RootOpt = None,
+    limit: Annotated[
+        int | None, typer.Option("--limit", help="今夜見る件数（既定はサービスの値）")
+    ] = None,
+    workers: WorkersOpt = None,
+) -> None:
+    """運営主体の根拠を、確認日の古い順に今夜の分だけ確かめ直す（ADR 0027）。"""
+    report = commands.cmd_recheck(_runtime(root), limit=limit, workers=workers or 1)
+    _report(report)
+    for note in report.notes:
+        typer.echo(f"  - {note}")
+
+
+@app.command()
 def guard(
     root: RootOpt = None,
     accept: Annotated[
@@ -584,6 +599,13 @@ def runs_report(
         seeds = None
     for line in weekly.report(rt.ws, days=days, source=source, seeds=seeds):
         typer.echo(line)
+    targets_hook = getattr(rt.service, "recheck_targets", None)
+    if targets_hook is not None:
+        # 運営主体の確かめ直し（ADR 0027）。件数・成り立たないもの・いちばん古い確認日
+        from sitemill.recheck import recheck_lines
+
+        for line in recheck_lines(rt.ws, list(targets_hook(rt.ws)), days=days):
+            typer.echo(line)
     if save:
         path = weekly.write_snapshot(rt.ws, days=days, source=source)
         typer.echo("")
