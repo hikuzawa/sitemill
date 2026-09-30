@@ -16,6 +16,9 @@ akiya-atlas が先に自治体の根拠で実装した回し方（akiya-atlas AD
   skip と unreachable は `wait_days` 日後に見直す。待たせないと、古い日付のまま毎晩の枠を取り続ける
 - 記録は `data/state/recheck.json`（件ごとの状態）と
   `data/runs/operator-rechecks.jsonl`（1 件 1 行）
+- 今夜の 1 件ずつの結果（`RecheckResult`）は `RecheckReport.results` に入り、`sitemill recheck` は
+  それをサービスの `recheck_done(ws, results)` に渡す。確認日を画面に出すサービスは、ここで
+  自分の記録へ書き戻す（この回し方はサービスの確認日を書き換えない。ADR 0027 の 09-30 の追記）
 
 **落とし穴**（akiya-atlas で実際に起きたもの）:
 - まとめて作り直すたびに全件の確認日を今日にしない。確かめていないものまで「確かめた」になる
@@ -53,12 +56,33 @@ class RecheckTarget:
     checked_on: date | None = None
 
 
+@dataclass(frozen=True)
+class RecheckResult:
+    """今夜確かめた 1 件の結果。`recheck_done` フックに渡す。
+
+    - result: 確かめた結果（ok / fail / skip / unreachable）
+    - checked_on: 今夜で確認日になった日（成り立った・選び直した）。それ以外は None
+    - failures: 今夜のあとの、続けて成り立たなかった晩数（成り立った・選び直したら 0。
+      見送り・通信できないときは、それまでの晩数のまま）
+    - reselected: 選び直したときの記録（サービスの `recheck_reselect` が返したもの）
+    """
+
+    key: str
+    label: str
+    result: str
+    reason: str = ""
+    failures: int = 0
+    checked_on: date | None = None
+    reselected: dict[str, Any] | None = None
+
+
 @dataclass
 class RecheckReport:
     checked: int = 0
     counts: dict[str, int] = field(default_factory=lambda: dict.fromkeys(RESULTS, 0))
     reselected: int = 0
     lines: list[str] = field(default_factory=list)
+    results: list[RecheckResult] = field(default_factory=list)  # 確かめた順
 
 
 def unreachable(res: FetchResult) -> bool:
@@ -129,10 +153,13 @@ def rotate(
     workers: int = 1,
     today: date | None = None,
     reselect: Callable[[RecheckTarget, str], dict[str, Any] | None] | None = None,
+    describe_reselect: Callable[[RecheckTarget, dict[str, Any]], str] | None = None,
 ) -> RecheckReport:
     """今夜の分を確かめ直し、状態と記録を書く。
 
-    `check` は (ok / fail / skip / unreachable, 理由) を返す。
+    `check` は (ok / fail / skip / unreachable, 理由) を返す。1 件ずつの結果は `report.results`
+    （確かめた順）。`describe_reselect` を渡すと、選び直しの行（`report.lines`）をサービスが書く
+    （無ければ記録をそのまま出す）。
     """
     today = today or jst_today()
     state = load_state(ws)
@@ -168,11 +195,14 @@ def rotate(
         }
         if reason:
             entry["reason"] = reason
+        failures, checked, reselected = 0, None, None
         if result in ("skip", "unreachable"):
             st.update(waiting_since=st.get("waiting_since") or today_s, waiting_reason=reason)
             st["last_tried"] = today_s
+            failures = int(st.get("failures") or 0)
         elif result == "ok":
             st = {"checked_on": today_s}
+            checked = today
         else:
             nights = int(st.get("failures") or 0) + 1
             st = {k: v for k, v in st.items() if k not in ("waiting_since", "waiting_reason")} | {
@@ -181,6 +211,7 @@ def rotate(
                 "reason": reason,
                 "last_tried": today_s,
             }
+            failures = nights
             entry["failures"] = nights
             report.lines.append(f"{target.label}: 成り立たない（{nights} 晩目）: {reason}")
             if nights >= retry_nights and reselect is not None:
@@ -190,9 +221,25 @@ def rotate(
                     log.append(entry)
                     entry = {"at": entry["at"], "result": "reselect", "key": target.key} | record
                     st = {"checked_on": today_s}
-                    report.lines.append(f"{target.label}: 選び直した（{record}）")
+                    failures, checked, reselected = 0, today, record
+                    report.lines.append(
+                        describe_reselect(target, record)
+                        if describe_reselect is not None
+                        else f"{target.label}: 選び直した（{record}）"
+                    )
         state[target.key] = st
         log.append(entry)
+        report.results.append(
+            RecheckResult(
+                key=target.key,
+                label=target.label,
+                result=result,
+                reason=reason,
+                failures=failures,
+                checked_on=checked,
+                reselected=reselected,
+            )
+        )
     _save_state(ws, state)
     if log:
         ws.runs_dir.mkdir(parents=True, exist_ok=True)

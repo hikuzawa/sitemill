@@ -9,12 +9,20 @@ from pathlib import Path
 
 import pytest
 
-from sitemill.clock import JST
-from sitemill.recheck import RecheckTarget, load_state, pick, recheck_lines, rotate
+from sitemill import commands
+from sitemill.clock import JST, jst_today
+from sitemill.recheck import (
+    RecheckResult,
+    RecheckTarget,
+    load_state,
+    pick,
+    recheck_lines,
+    rotate,
+)
 from sitemill.settings import Workspace
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from tests.dummy_service import make_workspace  # noqa: E402
+from tests.dummy_service import DummyService, make_workspace  # noqa: E402
 
 DAY = date(2026, 9, 28)
 
@@ -108,6 +116,105 @@ def test_a_crash_in_one_check_does_not_stop_the_night(ws: Workspace) -> None:
 
     report = rotate(ws, targets(), check, per_night=2, today=DAY)
     assert report.counts["fail"] == 1 and report.counts["ok"] == 1
+
+
+def test_each_result_is_handed_back_in_the_order_checked(ws: Workspace) -> None:
+    """成り立ったものは今日が確認日に。見送り・通信できないものは、それまでの晩数のまま。"""
+    state = {"b": {"failures": 1, "failed_since": "2026-09-27", "reason": "x"}}
+    ws.state_dir.mkdir(parents=True, exist_ok=True)
+    (ws.state_dir / "recheck.json").write_text(json.dumps(state), encoding="utf-8")
+    report = rotate(
+        ws, targets(), answers(c="fail", b="unreachable", d="skip"), per_night=4, today=DAY
+    )
+    assert report.results == [
+        RecheckResult("b", "B 町", "unreachable", "unreachable の理由", failures=1),
+        RecheckResult("c", "C 村", "fail", "fail の理由", failures=1),
+        RecheckResult("a", "A 市", "ok", "", checked_on=DAY),
+        RecheckResult("d", "D 島", "skip", "skip の理由"),
+    ]
+
+
+def test_a_reselection_is_in_the_results_and_the_service_writes_its_line(
+    ws: Workspace,
+) -> None:
+    def reselect(target: RecheckTarget, reason: str) -> dict:
+        return {"old": "old.example", "new": "new.example"}
+
+    def line(target: RecheckTarget, record: dict) -> str:
+        return f"{target.label}: 選び直した（公式 {record['old']} → {record['new']}）"
+
+    for day in (DAY, date(2026, 9, 29), date(2026, 9, 30)):
+        report = rotate(
+            ws,
+            targets(),
+            answers(c="fail"),
+            per_night=1,
+            today=day,
+            reselect=reselect,
+            describe_reselect=line,
+        )
+    [c] = [r for r in report.results if r.key == "c"]
+    assert c.result == "fail" and c.failures == 0 and c.checked_on == date(2026, 9, 30)
+    assert c.reselected == {"old": "old.example", "new": "new.example"}
+    assert "C 村: 選び直した（公式 old.example → new.example）" in report.lines
+
+
+class _RecheckService(DummyService):
+    """フックを持つサービス。C 村は前の晩まで 2 晩続けて成り立っていない。"""
+
+    recheck_per_night = 2
+
+    def __init__(self, *, fail_done: bool = False) -> None:
+        super().__init__()
+        self.done: list[RecheckResult] | None = None
+        self.fail_done = fail_done
+
+    def recheck_targets(self, ws: Workspace) -> list[RecheckTarget]:
+        return targets()
+
+    def recheck_one(self, ws: Workspace, target: RecheckTarget, client) -> tuple[str, str]:
+        return ("fail", "名乗りが無い") if target.key == "c" else ("ok", "")
+
+    def recheck_reselect(self, ws: Workspace, target: RecheckTarget, reason: str, client) -> dict:
+        return {"old": "old.example", "new": "new.example"}
+
+    def recheck_reselect_line(self, target: RecheckTarget, record: dict) -> str:
+        return f"{target.label}: 選び直した（{record['old']} → {record['new']}）"
+
+    def recheck_done(self, ws: Workspace, results: list[RecheckResult]) -> None:
+        if self.fail_done:
+            raise OSError("書き戻せない")
+        self.done = results
+
+
+def _runtime(tmp_path: Path, service: _RecheckService) -> commands.Runtime:
+    make_workspace(tmp_path)
+    rt = commands.Runtime.open(tmp_path, service=service)
+    state = {"c": {"failures": 2, "failed_since": "2026-09-26", "reason": "名乗りが無い"}}
+    (rt.ws.state_dir / "recheck.json").write_text(json.dumps(state), encoding="utf-8")
+    return rt
+
+
+def test_the_command_hands_the_results_to_recheck_done(tmp_path: Path) -> None:
+    """確認日を画面に出すサービスが、今夜確かめた分を自分の記録へ書き戻せるように。"""
+    service = _RecheckService()
+    report = commands.cmd_recheck(_runtime(tmp_path, service))
+    assert service.done is not None
+    by_key = {r.key: r for r in service.done}
+    assert set(by_key) == {"c", "b", "a"}  # 再試行（枠の外）と、古い順の 2 件
+    assert by_key["c"].reselected == {"old": "old.example", "new": "new.example"}
+    assert {r.checked_on for r in service.done} == {jst_today()}
+    assert "C 村: 選び直した（old.example → new.example）" in report.notes
+
+
+def test_a_failing_recheck_done_is_recorded_and_fails_the_command(tmp_path: Path) -> None:
+    """書き戻せなかったことを黙らない。状態ファイルは書いたあとなので、確かめた日は残る。"""
+    rt = _runtime(tmp_path, _RecheckService(fail_done=True))
+    with pytest.raises(OSError):
+        commands.cmd_recheck(rt)
+    latest = json.loads((rt.ws.runs_dir / "latest-recheck.json").read_text(encoding="utf-8"))
+    assert latest["errors"] == ["recheck_done: OSError: 書き戻せない"]
+    assert load_state(rt.ws)["a"] == {"checked_on": jst_today().isoformat()}
 
 
 def test_the_weekly_lines(ws: Workspace) -> None:

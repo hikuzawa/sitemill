@@ -413,6 +413,12 @@ def cmd_recheck(rt: Runtime, *, limit: int | None = None, workers: int = 1) -> R
     サービスが `recheck_targets(ws)` と `recheck_one(ws, target, client)` を持っていれば回す。
     `recheck_reselect(ws, target, reason, client)` があれば、続けて成り立たなかったものを選び直す。
     1 晩の件数はサービスの `recheck_per_night`（全件 ÷ 周期の日数）。
+
+    任意のフック（ADR 0027 の 09-30 の追記）:
+    - `recheck_done(ws, results)`: 回したあとに、今夜の 1 件ずつの結果（`RecheckResult` の並び）を
+      受け取る。確認日を画面に出すサービスが、自分の記録へ書き戻すのに使う。失敗したら実行レポートに
+      残してコマンドも失敗にする（状態ファイルは書いたあと。次に回したときの書き戻しに任せる）
+    - `recheck_reselect_line(target, record)`: 選び直しの行（実行ログ）をサービスが書く
     """
     report = new_report(rt.service.id, "recheck")
     targets_hook = getattr(rt.service, "recheck_targets", None)
@@ -422,6 +428,7 @@ def cmd_recheck(rt: Runtime, *, limit: int | None = None, workers: int = 1) -> R
         save_report(rt.ws.runs_dir, report)
         return report
     reselect_hook = getattr(rt.service, "recheck_reselect", None)
+    done_hook = getattr(rt.service, "recheck_done", None)
     per_night = limit or int(getattr(rt.service, "recheck_per_night", 0) or 0)
     with rt.client() as client:
         result = rotate(
@@ -435,6 +442,7 @@ def cmd_recheck(rt: Runtime, *, limit: int | None = None, workers: int = 1) -> R
                 if reselect_hook is not None
                 else None
             ),
+            describe_reselect=getattr(rt.service, "recheck_reselect_line", None),
         )
         report.bump("recheck", "requests", client.request_count)
     report.bump("recheck", "checked", result.checked)
@@ -442,6 +450,13 @@ def cmd_recheck(rt: Runtime, *, limit: int | None = None, workers: int = 1) -> R
         report.bump("recheck", key, n)
     report.bump("recheck", "reselected", result.reselected)
     report.notes.extend(result.lines)
+    if done_hook is not None:
+        try:
+            done_hook(rt.ws, result.results)
+        except Exception as e:
+            report.errors.append(f"recheck_done: {type(e).__name__}: {e}")
+            save_report(rt.ws.runs_dir, report)
+            raise
     save_report(rt.ws.runs_dir, report)
     return report
 
